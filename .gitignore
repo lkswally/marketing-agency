@@ -52,3 +52,4 @@ logs/
 # Engram local cache (if any)
 .engram-cache/
 .pipeline/
+.engram/
