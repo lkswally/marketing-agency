@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.local.*
+*.secret.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# MKT runtime state (kept locally, not versioned)
+outputs/*
+!outputs/.gitkeep
+data/clients/*/
+!data/clients/.gitkeep
+assets/clients/*/
+!assets/clients/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Engram local cache (if any)
+.engram-cache/
+.pipeline/
