@@ -13,11 +13,10 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Resolves at:** MKT-1D (Memory backend) at the earliest, more likely a dedicated block before MKT-3.
 - **Sketch:** Each persisted entity payload should carry the `domain-model.vN` it was written with. The repository layer is responsible for upgrading on read.
 
-### P-1B.2 — Cross-entity referential integrity
+### P-1B.2 — Cross-entity referential integrity  ✅ RESOLVED in MKT-1D
 - **Introduced:** MKT-1B
-- **Why deferred:** The domain model has no I/O and cannot look up other entities.
-- **Resolves at:** MKT-1D (Memory backend / repository).
-- **Sketch:** Repository helpers like `assert_audience_exists(audience_id)` invoked from a thin validation service before persisting `Campaign`, `Metric`, etc.
+- **Resolved at:** MKT-1D — `core/memory/referential_integrity.py` with `REFERENCE_MAP`, `find_missing_references`, `check_client_integrity`.
+- **Notes:** Pure helpers; do not raise. Callers decide enforcement.
 
 ### P-1B.3 — JSON Schema export to disk for external consumers
 - **Introduced:** MKT-1B
@@ -46,11 +45,10 @@ must say which block introduced it and which (estimated) block will resolve it.
 
 ## From MKT-1C (operational contracts)
 
-### P-1C.1 — Audit trail JSONL persistence
+### P-1C.1 — Audit trail JSONL persistence  ✅ RESOLVED in MKT-1D
 - **Introduced:** MKT-1C
-- **Why deferred:** `audit-trail.v1` defines the event shape and hash chain; storage (file layout, append-only writes, rotation, retention) is a memory-backend concern.
-- **Resolves at:** MKT-1D (Memory backend).
-- **Sketch:** `data/clients/<slug>/audit/<YYYY-MM-DD>.jsonl`, `O_APPEND`, daily rotation, retention configurable per client.
+- **Resolved at:** MKT-1D — `JsonFileMemory.append_audit_event` / `read_audit_events` / `last_audit_hash`. Daily UTC rotation, `_chain_tail.txt` for O(1) tail lookup.
+- **Notes:** Retention configurable per client is NOT in v1; revisit if needed.
 
 ### P-1C.2 — Strictness mode enforcers (qa_strict / dev_strict / design_strict / claim_strict)
 - **Introduced:** MKT-1C
@@ -76,3 +74,35 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-1C
 - **Why deferred:** The hash chain detects in-place tampering but not a wholesale replay. Anchoring (e.g. publishing daily root hashes to a trusted store) is out of scope.
 - **Resolves at:** not scheduled. Revisit when compliance requirements demand it.
+
+---
+
+## From MKT-1D (storage / memory layer + referential integrity)
+
+### P-1D.1 — Dynamic validation of `Metric.subject_id`
+- **Introduced:** MKT-1D
+- **Why deferred:** `Metric.subject_type` selects the target kind dynamically (client / competitor / channel / campaign / asset / persona / audience). A simple `(field, target_kind)` rule in `REFERENCE_MAP` cannot express this.
+- **Resolves at:** as needed. Likely a dedicated helper `validate_metric_subject(memory, metric)` in `core/memory/referential_integrity.py`.
+
+### P-1D.2 — Schema migration runner
+- **Introduced:** MKT-1D (carries over from P-1B.1)
+- **Why deferred:** `_meta.json` carries `contract_version` so old folders are detectable, but `v1` has nothing to migrate from. When the first breaking change to either `memory.v1` or `domain-model.v1` lands, the runner will live in `core/memory/migrations/`.
+- **Resolves at:** TBD per first migration need.
+
+### P-1D.3 — Cross-process / cross-host concurrency
+- **Introduced:** MKT-1D
+- **Why deferred:** `memory.v1` explicitly assumes single-process sequential use. The audit chain tail is not locked across processes.
+- **Resolves at:** when a multi-worker dispatcher or web entry point appears. Likely requires either a file-lock layer (`fcntl` / `msvcrt.locking`) or a swap to a backend with native concurrency (Postgres, Redis, Engram).
+
+### P-1D.4 — Audit retention / compaction
+- **Introduced:** MKT-1D
+- **Why deferred:** Daily JSONL files grow without bound. A real deployment will need a retention policy (e.g. archive after 90 days).
+- **Resolves at:** when usage demands it.
+
+### P-1D.5 — `mkt memory inspect` CLI
+- **Introduced:** MKT-1D
+- **Why deferred:** Useful for debugging (`mkt memory list demo-co audience`, `mkt memory check demo-co`) but no runtime exists yet.
+- **Resolves at:** MKT-2A.
+
+### P-1B.1 — Schema versioning / migration policy (SUPERSEDED by P-1D.2)
+- This item is now tracked as **P-1D.2** above.

@@ -1,0 +1,222 @@
+"""JsonFileMemory — filesystem-backed default :class:`Memory` implementation.
+
+Storage layout (see ``docs/storage-layout.md``):
+
+    <root>/<client_slug>/
+        _meta.json                      # backend metadata
+        <kind>/<entity_id>.json         # one JSON per entity
+        audit/
+            YYYY-MM-DD.jsonl            # one JSONL per UTC day, append-only
+            _chain_tail.txt             # hex hash of the last appended event
+
+Writes are atomic on POSIX and Windows via "write to temp + os.replace".
+Audit appends use ``mode="a"`` (O_APPEND) — single-process safe.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import re
+import tempfile
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+from core.contracts import AuditTrailEvent
+from core.domain.base import validate_slug
+
+from .base import MEMORY_CONTRACT_VERSION, Memory, validate_kind
+from .errors import AuditChainError, EntityNotFound
+
+# Entity ids appear in file names. Restrict to a safe alphabet to prevent
+# directory traversal and odd filesystem behavior.
+_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+def _validate_entity_id(entity_id: str) -> str:
+    if not isinstance(entity_id, str) or not _ID_RE.match(entity_id):
+        raise ValueError(
+            f"invalid entity_id {entity_id!r}: must match [A-Za-z0-9._-]{{1,128}}"
+        )
+    return entity_id
+
+
+def _atomic_write(target: Path, data: str, encoding: str = "utf-8") -> None:
+    """Write ``data`` to ``target`` atomically.
+
+    Uses ``tempfile`` in the same directory + ``os.replace`` so the file
+    appears in its final state or not at all.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # delete=False so we control the rename; we close the handle before replace.
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=target.name + ".",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline="\n") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, target)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+
+
+class JsonFileMemory(Memory):
+    """Filesystem-backed Memory.
+
+    Args:
+        root: directory under which client folders are created. Typically
+            ``Path("data/clients")`` relative to the repo root.
+    """
+
+    def __init__(self, root: Path | str) -> None:
+        self._root = Path(root)
+
+    # -------- path helpers --------
+
+    def _client_dir(self, client_slug: str) -> Path:
+        validate_slug(client_slug)
+        return self._root / client_slug
+
+    def _kind_dir(self, client_slug: str, kind: str) -> Path:
+        validate_kind(kind)
+        return self._client_dir(client_slug) / kind
+
+    def _entity_path(self, client_slug: str, kind: str, entity_id: str) -> Path:
+        _validate_entity_id(entity_id)
+        return self._kind_dir(client_slug, kind) / f"{entity_id}.json"
+
+    def _audit_dir(self, client_slug: str) -> Path:
+        return self._client_dir(client_slug) / "audit"
+
+    def _audit_day_path(self, client_slug: str, day: date) -> Path:
+        return self._audit_dir(client_slug) / f"{day.isoformat()}.jsonl"
+
+    def _chain_tail_path(self, client_slug: str) -> Path:
+        return self._audit_dir(client_slug) / "_chain_tail.txt"
+
+    def _meta_path(self, client_slug: str) -> Path:
+        return self._client_dir(client_slug) / "_meta.json"
+
+    def _ensure_meta(self, client_slug: str) -> None:
+        meta = self._meta_path(client_slug)
+        if meta.exists():
+            return
+        payload = {
+            "contract_version": MEMORY_CONTRACT_VERSION,
+            "client_slug": client_slug,
+            "created_at": datetime.now().astimezone().isoformat(),
+        }
+        _atomic_write(meta, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+    # -------- entity CRUD --------
+
+    def put(
+        self, client_slug: str, kind: str, entity_id: str, data: dict[str, Any]
+    ) -> None:
+        path = self._entity_path(client_slug, kind, entity_id)
+        self._ensure_meta(client_slug)
+        _atomic_write(path, json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+
+    def get(self, client_slug: str, kind: str, entity_id: str) -> dict[str, Any]:
+        path = self._entity_path(client_slug, kind, entity_id)
+        if not path.exists():
+            raise EntityNotFound(client_slug, kind, entity_id)
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list(self, client_slug: str, kind: str) -> list[dict[str, Any]]:
+        kind_dir = self._kind_dir(client_slug, kind)
+        if not kind_dir.exists():
+            return []
+        out: list[dict[str, Any]] = []
+        # Stable order: sorted by filename (== entity_id).
+        for f in sorted(kind_dir.glob("*.json")):
+            with f.open("r", encoding="utf-8") as fh:
+                out.append(json.load(fh))
+        return out
+
+    def exists(self, client_slug: str, kind: str, entity_id: str) -> bool:
+        return self._entity_path(client_slug, kind, entity_id).exists()
+
+    def delete(self, client_slug: str, kind: str, entity_id: str) -> None:
+        path = self._entity_path(client_slug, kind, entity_id)
+        if not path.exists():
+            raise EntityNotFound(client_slug, kind, entity_id)
+        path.unlink()
+
+    # -------- audit trail --------
+
+    def append_audit_event(self, event: AuditTrailEvent) -> None:
+        if event.client_slug is None:
+            raise ValueError(
+                "JsonFileMemory.append_audit_event requires event.client_slug "
+                "to be set (storage is multi-tenant)"
+            )
+        client_slug = event.client_slug
+        # Re-validate the slug. The contract already does, but defense in depth.
+        validate_slug(client_slug)
+
+        last = self.last_audit_hash(client_slug)
+        if event.prev_hash != last:
+            raise AuditChainError(
+                f"prev_hash mismatch for client {client_slug!r}: "
+                f"event.prev_hash={event.prev_hash!r} stored_tail={last!r}"
+            )
+
+        day_path = self._audit_day_path(client_slug, event.occurred_at.date())
+        day_path.parent.mkdir(parents=True, exist_ok=True)
+        line = event.to_json() + "\n"
+        # Append-only: O_APPEND semantics via "a" mode.
+        with day_path.open("a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+
+        # Update chain tail atomically.
+        _atomic_write(self._chain_tail_path(client_slug), event.hash + "\n")
+
+    def read_audit_events(
+        self, client_slug: str, day: date | None = None
+    ) -> list[AuditTrailEvent]:
+        validate_slug(client_slug)
+        audit_dir = self._audit_dir(client_slug)
+        if not audit_dir.exists():
+            return []
+
+        if day is not None:
+            files = [self._audit_day_path(client_slug, day)]
+        else:
+            files = sorted(audit_dir.glob("*.jsonl"))
+
+        events: list[AuditTrailEvent] = []
+        for path in files:
+            if not path.exists():
+                continue
+            with path.open("r", encoding="utf-8") as f:
+                for lineno, raw in enumerate(f, start=1):
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        events.append(AuditTrailEvent.from_json(raw))
+                    except Exception as e:  # noqa: BLE001
+                        raise AuditChainError(
+                            f"corrupt audit JSONL at {path}:{lineno}: {e}"
+                        ) from e
+        return events
+
+    def last_audit_hash(self, client_slug: str) -> str | None:
+        validate_slug(client_slug)
+        tail = self._chain_tail_path(client_slug)
+        if not tail.exists():
+            return None
+        text = tail.read_text(encoding="utf-8").strip()
+        return text or None
