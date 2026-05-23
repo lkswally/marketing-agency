@@ -65,7 +65,7 @@ A snapshot groups `metric_ids` for a `(subject, date)` pair. It does not embed v
 ## Alternatives considered
 
 - **Dataclasses instead of Pydantic.** Rejected: validation is the point.
-- **Single mega-file `domain.py`.** Rejected: 17 entities + 13 enums in one file is unreadable; tooling and git diffs degrade.
+- **Single mega-file `domain.py`.** Rejected: 17 entities + 14 enums in one file is unreadable; tooling and git diffs degrade.
 - **`Persona` inside `Audience`.** Rejected: user spec lists Persona as an independent entity (#5); independent file matches that.
 - **Inline enums per file.** Rejected: `ChannelType`, `SubjectType`, `MetricSource`/`Category` are reused across multiple entities; central `enums.py` avoids drift.
 - **Foreign-key style cross-entity validation in the model.** Rejected: requires lookups, couples model to storage.
