@@ -41,3 +41,38 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-1A (Engram rejected the project name).
 - **Why deferred:** `.engram/config.json` is now in place but Engram won't register the project until Claude Code is opened from the repo root once.
 - **Resolves at:** anytime (manual user action — open Claude Code from `D:\ProyectosIA\MARKETING-AGENCY-OS\`).
+
+---
+
+## From MKT-1C (operational contracts)
+
+### P-1C.1 — Audit trail JSONL persistence
+- **Introduced:** MKT-1C
+- **Why deferred:** `audit-trail.v1` defines the event shape and hash chain; storage (file layout, append-only writes, rotation, retention) is a memory-backend concern.
+- **Resolves at:** MKT-1D (Memory backend).
+- **Sketch:** `data/clients/<slug>/audit/<YYYY-MM-DD>.jsonl`, `O_APPEND`, daily rotation, retention configurable per client.
+
+### P-1C.2 — Strictness mode enforcers (qa_strict / dev_strict / design_strict / claim_strict)
+- **Introduced:** MKT-1C
+- **Why deferred:** Modes are caller policy (D-3.8), not schema. They belong in the dispatcher.
+- **Resolves at:** MKT-2A (minimal dispatcher) for the first mode, the rest as agents land.
+
+### P-1C.3 — `predicate_kind` evaluators
+- **Introduced:** MKT-1C
+- **Why deferred:** The contract declares the kinds; evaluating them needs runtime state (envelopes seen, memory, filesystem).
+- **Resolves at:** MKT-2A onwards. Each block that introduces a phase ships the predicate(s) it needs.
+
+### P-1C.4 — Hash classifier fragility
+- **Introduced:** MKT-1C
+- **Why deferred:** `_classify` in `validators.py` matches on Pydantic error message substrings ("hash mismatch", "timezone-aware", "duplicate"). If the message wording in our own validators changes, classification silently degrades.
+- **Resolves at:** as needed. Tests pin the current behavior. A more robust path would surface a custom error type from each `model_validator`, but that's overhead disproportionate to the risk at this stage.
+
+### P-1C.5 — Human override field for blocked claim audits
+- **Introduced:** MKT-1C
+- **Why deferred:** The `blocks_emission` policy is strict by design in `v1`. A human override (signed acknowledgement of a risky claim) is a workflow concern.
+- **Resolves at:** MKT-3B (claim audit enforcement in envelope) at earliest.
+
+### P-1C.6 — External anchoring of audit chain
+- **Introduced:** MKT-1C
+- **Why deferred:** The hash chain detects in-place tampering but not a wholesale replay. Anchoring (e.g. publishing daily root hashes to a trusted store) is out of scope.
+- **Resolves at:** not scheduled. Revisit when compliance requirements demand it.
