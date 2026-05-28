@@ -1,0 +1,41 @@
+workflow_id: W1_intake_to_strategy
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Onboarding a new client: capture the brief, define audience(s), and arrive
+  at a positioning + brand voice the rest of the system can build on.
+
+  Inputs: a raw client brief (free text or partial structured payload).
+  Outputs: persisted MarketingBrief, Audience(s), Persona(s) (optional),
+  Positioning, Brand (with voice).
+
+phases:
+  - id: intake
+    description: Capture and normalize the client brief.
+    agents: [mkt-orchestrator]
+    gates_required_before: []
+    gates_produced: [g_brief_captured]
+    outputs: [brief]
+
+  - id: research
+    description: Define audiences and surface initial competitor signals.
+    agents: [audience-researcher]
+    gates_required_before: [g_brief_captured]
+    gates_produced: [g_audience_research_complete]
+    outputs: [audience, persona]
+
+  - id: strategy
+    description: |
+      Draft positioning and brand voice based on the brief + audience.
+    agents: [brand-strategist]
+    gates_required_before: [g_audience_research_complete]
+    gates_produced: [g_positioning_drafted, g_brand_voice_captured]
+    outputs: [positioning, brand]
+
+approval:
+  state_machine: standard
+  human_required_at: [strategy]
+
+notes:
+  - "Competitor deep-dive is W2's job; W1 only captures signals if surfaced."
+  - "Personas are optional: a generic Audience is acceptable for v1."

@@ -1,0 +1,43 @@
+workflow_id: W3_campaign_builder
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Assemble a planned Campaign: pick channels, draft the offer, and tie
+  everything to Brief + Positioning + Audience(s). The Campaign is left in
+  status=planned. Creative drafting is W4's job.
+
+  Inputs: Brief, Audience(s), Positioning, Brand, Competitor baseline,
+  Keyword universe.
+  Outputs: Channel(s), Offer(s), Campaign.
+
+phases:
+  - id: channel_mix
+    description: Recommend channels for the campaign based on Audience + brand fit.
+    agents: [channel-advisor-agent, paid-ads-strategist, seo-content-planner]
+    gates_required_before: [g_audience_research_complete, g_competitor_baseline, g_keywords_drafted]
+    gates_produced: [g_channels_proposed]
+    outputs: [channel]
+
+  - id: offer
+    description: Draft the campaign's offer (free trial, lead magnet, bundle, etc.).
+    agents: [brand-strategist]
+    gates_required_before: [g_positioning_drafted]
+    gates_produced: [g_offer_drafted]
+    outputs: [offer]
+
+  - id: assemble
+    description: |
+      Assemble the Campaign entity wiring brief, audience(s), channel(s),
+      offer(s). Leaves status=planned.
+    agents: [mkt-orchestrator]
+    gates_required_before: [g_channels_proposed, g_offer_drafted]
+    gates_produced: [g_campaign_drafted]
+    outputs: [campaign]
+
+approval:
+  state_machine: standard
+  human_required_at: [assemble]
+
+notes:
+  - "channel_mix runs three agents because each owns a channel family."
+  - "If only paid channels are needed, seo-content-planner produces an empty Channel set."

@@ -106,3 +106,54 @@ must say which block introduced it and which (estimated) block will resolve it.
 
 ### P-1B.1 — Schema versioning / migration policy (SUPERSEDED by P-1D.2)
 - This item is now tracked as **P-1D.2** above.
+
+---
+
+## From MKT-1E (workflow + agent + skill specs)
+
+### P-1E.1 — Promote spec formats to versioned Pydantic contracts
+- **Introduced:** MKT-1E
+- **Why deferred:** MKT-1E intentionally documents `workflow-spec.v1`, `agent-spec.v1`, `skill-spec.v1` in prose and YAML, without binding them to Pydantic models. The right contract shape will emerge when the dispatcher tries to consume them.
+- **Resolves at:** MKT-2A.
+- **Sketch:** `core/contracts/specs/workflow.py`, `agent.py`, `skill.py` modeled on `envelope.v1` / `phase-gate.v1`.
+
+### P-1E.2 — Spec linter
+- **Introduced:** MKT-1E
+- **Why deferred:** No tests exist for the specs themselves. Every `consumed_gate` should resolve to some `produced_gate`; every `agent_id` in a workflow should exist under `agents/`; every `skill_id` referenced by an agent should exist under `skills/`. Today these invariants are enforced by review, not code.
+- **Resolves at:** MKT-2A.
+- **Sketch:** `tools/lint_specs.py` walks `workflows/`, `agents/`, `skills/` and reports violations.
+
+### P-1E.3 — Promote agents from `spec_only` to `implemented`
+- **Introduced:** MKT-1E
+- **Why deferred:** Every agent ships with `status: spec_only`. The dispatcher will refuse to spawn them until promoted.
+- **Resolves at:** per-agent, block by block from MKT-2B onwards.
+
+### P-1E.4 — Promote skills from `spec_only` to `implemented`
+- **Introduced:** MKT-1E
+- **Why deferred:** Skills are atomic capabilities; their implementation lives alongside the agent block that needs them first.
+- **Resolves at:** per-skill, block by block.
+
+### P-1E.5 — Approval Center implementation
+- **Introduced:** MKT-1E
+- **Why deferred:** The state machine is documented; the persisted state, the UI, and the human transition events are not.
+- **Resolves at:** MKT-2B+ (likely with a small backend for approval entities + a temporary CLI before the Portal exists).
+
+### P-1E.6 — n8n bridge (R3+ in `n8n-automation-roadmap.md`)
+- **Introduced:** MKT-1E
+- **Why deferred:** v1 only plans n8n workflows; nothing executes them. The trigger-only bridge is a separate, opt-in block.
+- **Resolves at:** post-MKT-6.
+
+### P-1E.7 — Portal (any phase)
+- **Introduced:** MKT-1E
+- **Why deferred:** UI choice is independent and orthogonal to the core. v1 has no Portal.
+- **Resolves at:** dedicated block when the agency operationally needs it.
+
+### P-1E.8 — Live analytics connectors
+- **Introduced:** MKT-1E (carries forward from earlier blocks)
+- **Why deferred:** All `MetricSource` values except `MANUAL` and `INTERNAL_REPORT` need real adapters.
+- **Resolves at:** MKT-6A (EMAIL), MKT-6B (GA4 + SEARCH_SEO), post-MKT-6 (SOCIAL, PUBLIC_FOOTPRINT).
+
+### P-1E.9 — CSV / JSON import for `INTERNAL_REPORT` Metrics
+- **Introduced:** MKT-1E
+- **Why deferred:** v1 accepts Metric entities written via Memory. A small import helper would make humans faster but is not blocking.
+- **Resolves at:** MKT-2A (as part of the CLI surface).

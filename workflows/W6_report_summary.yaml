@@ -1,0 +1,44 @@
+workflow_id: W6_report_summary
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Produce a period Report from existing Metric entities. In MVP there are no
+  live data sources (see analytics-roadmap.md), so this workflow operates on
+  Metrics that arrived via MANUAL or INTERNAL_REPORT sources.
+
+  Inputs: Client, Campaign(s), Metric(s) in the period, optional
+  DigitalFootprintSnapshot(s).
+  Outputs: Report.
+
+phases:
+  - id: analyze
+    description: |
+      Aggregate Metric values, surface deltas vs prior period, identify
+      anomalies. Produces narrative bullets.
+    agents: [analytics-agent]
+    gates_required_before: []
+    gates_produced: [g_metrics_summarized]
+    outputs: []
+
+  - id: optimize
+    description: |
+      Optional optimization recommendations based on the period's metrics.
+    agents: [optimizer-agent]
+    gates_required_before: [g_metrics_summarized]
+    gates_produced: [g_optimization_recommended]
+    outputs: []   # recommendations are persisted as GrowthBacklogItem(s)
+
+  - id: report
+    description: Assemble the Report entity (narrative + metric_ids + highlights + next_steps).
+    agents: [analytics-agent]
+    gates_required_before: [g_metrics_summarized, g_optimization_recommended]
+    gates_produced: [g_report_drafted]
+    outputs: [report]
+
+approval:
+  state_machine: standard
+  human_required_at: []
+
+notes:
+  - "If no metrics exist for the period, the workflow halts at analyze with a clear blocker."
+  - "Recommendations land in GrowthBacklogItem (kind=backlog) so they survive the report."

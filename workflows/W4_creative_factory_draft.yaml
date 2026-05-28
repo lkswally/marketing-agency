@@ -1,0 +1,57 @@
+workflow_id: W4_creative_factory_draft
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Produce creative drafts for the planned Campaign: copy, landing page copy,
+  email sequences, social posts, reels scripts. Each draft is an Asset
+  carrying the claims it makes (so W5 can audit them).
+
+  Inputs: Campaign (status=planned), Brand, Positioning, Audience(s), Offer(s).
+  Outputs: Asset(s) per requested channel, each with claim_ids.
+
+phases:
+  - id: brief
+    description: Creative brief assembled from Campaign + Brand.
+    agents: [creative-director]
+    gates_required_before: [g_campaign_drafted]
+    gates_produced: [g_creative_brief_ready]
+    outputs: [asset]   # the creative brief itself is an Asset (kind=COPY)
+
+  - id: copy
+    description: Headlines, body copy, landing copy.
+    agents: [copywriter]
+    gates_required_before: [g_creative_brief_ready]
+    gates_produced: [g_copy_drafted]
+    outputs: [asset]
+
+  - id: social
+    description: Social posts + reels scripts.
+    agents: [reels-scriptwriter, copywriter]
+    gates_required_before: [g_creative_brief_ready]
+    gates_produced: [g_social_drafted]
+    outputs: [asset]
+
+  - id: email
+    description: Email nurture sequence draft.
+    agents: [copywriter]
+    gates_required_before: [g_creative_brief_ready]
+    gates_produced: [g_email_drafted]
+    outputs: [asset]
+
+  - id: bundle
+    description: |
+      Collect creative assets into a "creatives drafted" bundle so W5 has
+      a single gate to consume.
+    agents: [creative-director]
+    gates_required_before: [g_copy_drafted, g_social_drafted, g_email_drafted]
+    gates_produced: [g_creatives_drafted]
+    outputs: []
+
+approval:
+  state_machine: standard
+  human_required_at: []
+
+notes:
+  - "Drafts: no human approval here. Approval is W5."
+  - "An agent that produces an Asset with claims MUST set claim_ids; W5 enforces."
+  - "Some campaigns may skip the email or social phase — the gate is still produced (empty)."

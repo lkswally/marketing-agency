@@ -1,0 +1,48 @@
+workflow_id: W5_claim_audit_and_approval
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Compliance pass over every creative Asset produced by W4, followed by an
+  Approval Center handoff. Anything carrying claims is audited by the
+  compliance-auditor; anything that blocks_emission is sent back via
+  NEEDS_REVISION.
+
+  Inputs: Asset(s) with claim_ids from W4.
+  Outputs: Asset(s) with ClaimAudit attached, Approval Center entry, audit
+  trail events for every decision.
+
+phases:
+  - id: compliance
+    description: |
+      For every Asset with non-empty claim_ids, produce a ClaimAudit and
+      decide whether it blocks emission.
+    agents: [compliance-auditor]
+    gates_required_before: [g_creatives_drafted]
+    gates_produced: [g_compliance_passed]
+    outputs: [claim_audit]   # informational; lives inside the carrying envelope
+
+  - id: package
+    description: |
+      Package the approved creative bundle for human review. Snapshots the
+      hash of every artifact at this moment.
+    agents: [approval-manager]
+    gates_required_before: [g_compliance_passed]
+    gates_produced: [g_approval_packaged]
+    outputs: [approval]
+
+  - id: approval
+    description: |
+      Human approval. State machine in approval-center.md. This phase is
+      intentionally blocking until the human acts.
+    agents: [approval-manager]
+    gates_required_before: [g_approval_packaged]
+    gates_produced: [g_approval_granted]
+    outputs: []
+
+approval:
+  state_machine: standard
+  human_required_at: [approval]
+
+notes:
+  - "If any ClaimAudit.blocks_emission == True, compliance does NOT produce its gate."
+  - "REJECTED approval cancels the workflow run; NEEDS_REVISION re-enters W4.bundle with notes."

@@ -1,0 +1,35 @@
+workflow_id: W2_keyword_and_competitor_research
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Build the keyword universe (clusters + negatives + hashtag set) and a
+  competitor baseline (top N competitors with their observed claims and
+  positioning summary).
+
+  Inputs: persisted Brand, Audience, Positioning (from W1).
+  Outputs: Competitor entities, keyword cluster bundle persisted to memory
+  (kind: keyword_universe), hashtag list.
+
+phases:
+  - id: competitor
+    description: Identify top competitors and capture their observed claims.
+    agents: [competitor-benchmark-agent]
+    gates_required_before: [g_positioning_drafted]
+    gates_produced: [g_competitor_baseline]
+    outputs: [competitor]
+
+  - id: keywords
+    description: |
+      Build keyword clusters, negative keywords, and a hashtag short-list.
+    agents: [keyword-intelligence-agent]
+    gates_required_before: [g_positioning_drafted]
+    gates_produced: [g_keywords_drafted]
+    outputs: [keyword_universe]
+
+approval:
+  state_machine: standard
+  human_required_at: []
+
+notes:
+  - "Both phases can run in parallel once g_positioning_drafted holds."
+  - "Keyword sources are out of scope here — see analytics-roadmap.md."
