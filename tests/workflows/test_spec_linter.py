@@ -99,6 +99,8 @@ def test_agent_lint_missing_frontmatter(tmp_path: Path) -> None:
 
 
 def test_agent_lint_missing_field(tmp_path: Path) -> None:
+    # Missing `status` → caught by Pydantic, reported via the unified
+    # ``agent_invalid`` rule (MKT-2B promoted the spec to Pydantic).
     p = tmp_path / "x.md"
     p.write_text(
         "---\nagent_id: x\nversion: 1\nspec_version: agent-spec.v1\n---\nbody\n",
@@ -106,7 +108,7 @@ def test_agent_lint_missing_field(tmp_path: Path) -> None:
     )
     findings = lint_agent_file(p, known_skills=set())
     assert any(
-        f.rule == "agent_missing_field" and "status" in f.message for f in findings
+        f.rule == "agent_invalid" and "status" in f.message for f in findings
     )
 
 
@@ -117,7 +119,7 @@ def test_agent_lint_invalid_status(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     findings = lint_agent_file(p, known_skills=set())
-    assert any(f.rule == "agent_invalid_status" for f in findings)
+    assert any(f.rule == "agent_invalid" for f in findings)
 
 
 def test_agent_lint_unknown_skill(tmp_path: Path) -> None:
@@ -157,7 +159,7 @@ def test_skill_lint_invalid_status(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     findings = lint_skill_file(p)
-    assert any(f.rule == "skill_invalid_status" for f in findings)
+    assert any(f.rule == "skill_invalid" for f in findings)
 
 
 # ---------- lint_all over the real repo ----------

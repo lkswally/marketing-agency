@@ -143,11 +143,18 @@ def lint_agent_file(
     *,
     known_skills: set[str],
 ) -> list[LintFinding]:
-    """Structural checks on an agent markdown spec."""
+    """Structural checks on an agent markdown spec.
+
+    Delegates to :func:`core.agents.load_agent` for Pydantic validation
+    against ``agent-spec.v1``. Adds cross-spec checks the loader cannot do
+    on its own (e.g. ``skills`` referencing unknown skill files).
+    """
+    from core.agents import AgentLoadError, load_agent
+
     findings: list[LintFinding] = []
-    fm = _read_frontmatter(path)
     target = str(path)
 
+    fm = _read_frontmatter(path)
     if fm is None:
         findings.append(
             LintFinding(
@@ -159,52 +166,30 @@ def lint_agent_file(
         )
         return findings
 
-    required = ["agent_id", "version", "spec_version", "status"]
-    for key in required:
-        if key not in fm:
-            findings.append(
-                LintFinding(
-                    severity="error",
-                    rule="agent_missing_field",
-                    target=target,
-                    message=f"missing frontmatter field {key!r}",
-                )
-            )
-
-    status = fm.get("status")
-    if status not in (None, "spec_only", "implemented"):
+    try:
+        spec = load_agent(path)
+    except AgentLoadError as e:
         findings.append(
             LintFinding(
                 severity="error",
-                rule="agent_invalid_status",
+                rule="agent_invalid",
                 target=target,
-                message=f"status must be 'spec_only' or 'implemented' (got {status!r})",
+                message=str(e),
             )
         )
+        return findings
 
-    spec_version = fm.get("spec_version")
-    if spec_version not in (None, "agent-spec.v1"):
-        findings.append(
-            LintFinding(
-                severity="warning",
-                rule="agent_unknown_spec_version",
-                target=target,
-                message=f"unrecognized spec_version {spec_version!r}",
-            )
-        )
-
-    skills = fm.get("skills", [])
-    if isinstance(skills, list):
-        for s in skills:
-            if isinstance(s, str) and s not in known_skills:
-                findings.append(
-                    LintFinding(
-                        severity="error",
-                        rule="agent_skill_not_found",
-                        target=target,
-                        message=f"agent references skill {s!r} which is not under skills/",
-                    )
+    # Cross-spec: every referenced skill must exist under skills/.
+    for s in spec.skills:
+        if s not in known_skills:
+            findings.append(
+                LintFinding(
+                    severity="error",
+                    rule="agent_skill_not_found",
+                    target=target,
+                    message=f"agent references skill {s!r} which is not under skills/",
                 )
+            )
 
     return findings
 
@@ -212,8 +197,10 @@ def lint_agent_file(
 def lint_skill_file(path: Path) -> list[LintFinding]:
     """Structural checks on a skill markdown spec."""
     findings: list[LintFinding] = []
-    fm = _read_frontmatter(path)
+    from core.skills import SkillLoadError, load_skill
+
     target = str(path)
+    fm = _read_frontmatter(path)
 
     if fm is None:
         findings.append(
@@ -226,26 +213,15 @@ def lint_skill_file(path: Path) -> list[LintFinding]:
         )
         return findings
 
-    required = ["skill_id", "version", "spec_version", "status"]
-    for key in required:
-        if key not in fm:
-            findings.append(
-                LintFinding(
-                    severity="error",
-                    rule="skill_missing_field",
-                    target=target,
-                    message=f"missing frontmatter field {key!r}",
-                )
-            )
-
-    status = fm.get("status")
-    if status not in (None, "spec_only", "implemented"):
+    try:
+        load_skill(path)
+    except SkillLoadError as e:
         findings.append(
             LintFinding(
                 severity="error",
-                rule="skill_invalid_status",
+                rule="skill_invalid",
                 target=target,
-                message=f"status must be 'spec_only' or 'implemented' (got {status!r})",
+                message=str(e),
             )
         )
 

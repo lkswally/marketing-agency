@@ -166,15 +166,14 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Why deferred:** v1 ships only `mkt memory inspect`. Useful additions: `mkt memory list <client> <kind>`, `mkt memory get <client> <kind> <id>`, `mkt memory check <client>` (referential integrity walker), `mkt memory put <client> <kind> <id> --from-file`, `mkt memory tail-audit <client>`.
 - **Resolves at:** as needed for debugging and ops.
 
-### P-2A.2 — Promote `agent-spec.v1` and `skill-spec.v1` to Pydantic contracts
+### P-2A.2 — Promote `agent-spec.v1` and `skill-spec.v1` to Pydantic contracts  ✅ RESOLVED in MKT-2B
 - **Introduced:** MKT-2A
-- **Why deferred:** MKT-2A's linter checks frontmatter shape but does not bind it to a Pydantic model. Promotion makes sense when the runtime starts loading agents to invoke them (not when it just lints their specs).
-- **Resolves at:** MKT-2B.
+- **Resolved at:** MKT-2B — `core/agents/spec.py` and `core/skills/spec.py` ship Pydantic models. Loaders parse markdown frontmatter and validate. All 33 real specs validate.
 
 ### P-2A.3 — Claude Code subagent spawn backend
 - **Introduced:** MKT-2A
-- **Why deferred:** MKT-2A is mock-only by approved decision. The dispatcher already accepts an injectable agent (`MinimalDispatcher(memory, agent=...)`), so the swap is a single class.
-- **Resolves at:** MKT-2B with its own approval.
+- **Status:** ⚠ still scaffolding-only. MKT-2B added `core/runtime/backends/claude_code.py` (raises `NotImplementedError`) + the safety checklist in `docs/runtime/agent-backend-safety.md`. The runtime accepts a backend via `MinimalDispatcher(memory, agent_backend=...)`.
+- **Resolves at:** dedicated block, only after every item in the safety checklist is satisfied AND with explicit user approval.
 
 ### P-2A.4 — Parallel agents within a phase
 - **Introduced:** MKT-2A
@@ -191,7 +190,35 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Why deferred:** Trivially folds into the broader migration runner (P-1D.2). Recorded here for traceability.
 - **Resolves at:** with P-1D.2.
 
-### P-2A.7 — Dispatcher should consult `predicates.evaluate` instead of `held_gates` only
+### P-2A.7 — Dispatcher should consult `predicates.evaluate` instead of `held_gates` only  ✅ RESOLVED in MKT-2B
 - **Introduced:** MKT-2A
-- **Why deferred:** The dispatcher today walks `gates_required_before` against an in-memory `held_gates` set. The predicate registry exists but is bypassed for the simple "gate held" case. Future predicate kinds (e.g. `no_unsafe_claims`) will need richer evaluation.
-- **Resolves at:** MKT-3 / MKT-2B when the first non-`envelope_present` predicate is needed.
+- **Resolved at:** MKT-2B — `core/runtime/predicates.evaluate_required_gate` is the dispatcher's single choke point. Today's policy delegates to `held_gates` (unchanged observable behavior), but future predicates (e.g. `no_unsafe_claims`) plug in at one place.
+
+---
+
+## From MKT-2B (agent/skill contracts + backend interface)
+
+### P-2B.1 — `ClaudeCodeBackend` real implementation
+- **Introduced:** MKT-2B
+- **Why deferred:** Real LLM spawn with tools is high-risk and explicitly out of scope. Safety boundaries documented; no implementation until they are all in place.
+- **Resolves at:** dedicated block with explicit approval AND completion of every item in `docs/runtime/agent-backend-safety.md` §3 promotion checklist.
+
+### P-2B.2 — Parallel agents within a phase
+- **Introduced:** MKT-2A (carried forward as P-2A.4) → still pending.
+- **Why deferred:** Sequential is correct for mocks; parallelization matters once real agents land and W3.channel_mix runs three of them.
+- **Resolves at:** same block as `ClaudeCodeBackend` or shortly after.
+
+### P-2B.3 — Strict IO entry types for agent / skill specs
+- **Introduced:** MKT-2B
+- **Why deferred:** `AgentIOEntry` uses `extra="allow"` and `SkillSpec.inputs/outputs` accept `list[Any]` (dicts or strings). This is the trade-off taken to avoid rewriting 33 MKT-1E specs. A future block can introduce typed IO entries and migrate the specs.
+- **Resolves at:** when the dispatcher needs to resolve typed upstream entities to pass into an agent.
+
+### P-2B.4 — Audit event types for backend invocations
+- **Introduced:** MKT-2B
+- **Why deferred:** When `ClaudeCodeBackend` ships, it must emit `agent_spawned` / `agent_returned` / `agent_failed` (per safety doc §2.6). These are additive to `audit-trail.v1`.
+- **Resolves at:** with `ClaudeCodeBackend` implementation.
+
+### P-2B.5 — Runtime model resolution
+- **Introduced:** MKT-2B
+- **Why deferred:** `default_model` in specs is `opus | sonnet | haiku`. A real backend needs to resolve these to concrete model identifiers and override per invocation (e.g. retry with a stronger model). Out of scope today.
+- **Resolves at:** with `ClaudeCodeBackend` implementation.

@@ -40,9 +40,10 @@ from core.domain.base import new_id, utcnow
 from core.memory import Memory
 
 from ..workflows.spec import PhaseSpec, WorkflowSpec
+from .backend import AgentBackend, AgentInvocation
+from .backends.mock import MockAgentBackend
 from .errors import GateBlockingError
-from .mock_agent import MockAgent, MockAgentInput
-from .predicates import evaluable_kinds
+from .predicates import evaluable_kinds, evaluate_required_gate
 
 # Memory kinds the dispatcher writes to.
 ENVELOPE_KIND = "envelope"
@@ -62,11 +63,21 @@ class RunState:
 
 
 class MinimalDispatcher:
-    """Execute a workflow spec with a mock agent backend."""
+    """Execute a workflow spec with a pluggable :class:`AgentBackend`.
 
-    def __init__(self, memory: Memory, agent: MockAgent | None = None) -> None:
+    Default backend is :class:`MockAgentBackend`. Passing a backend whose
+    ``run`` raises (e.g. :class:`ClaudeCodeBackend`) is allowed at construction
+    time and only fails on actual execution — this lets callers wire backends
+    in advance of their implementation.
+    """
+
+    def __init__(
+        self,
+        memory: Memory,
+        agent_backend: AgentBackend | None = None,
+    ) -> None:
         self._memory = memory
-        self._agent = agent or MockAgent()
+        self._agent_backend: AgentBackend = agent_backend or MockAgentBackend()
 
     # -------- public API --------
 
@@ -153,8 +164,8 @@ class MinimalDispatcher:
 
         for agent_id in phase.agents:
             step_started = utcnow()
-            envelope = self._agent.run(
-                MockAgentInput(
+            envelope = self._agent_backend.run(
+                AgentInvocation(
                     agent_id=agent_id,
                     phase_id=phase.id,
                     workflow_id=spec.workflow_id,
@@ -180,8 +191,17 @@ class MinimalDispatcher:
     def _check_required_gates(
         self, phase: PhaseSpec, state: RunState
     ) -> list[str]:
-        """Return the list of required gates that are NOT held by the run state."""
-        return [g for g in phase.gates_required_before if g not in state.held_gates]
+        """Return the list of blockers from every failing required gate.
+
+        Delegates per-gate evaluation to :func:`predicates.evaluate_required_gate`
+        so future blocks can override policy without touching the dispatcher.
+        """
+        blockers: list[str] = []
+        for gate_name in phase.gates_required_before:
+            ok, gate_blockers = evaluate_required_gate(state, gate_name)
+            if not ok:
+                blockers.extend(gate_blockers)
+        return blockers
 
     def _persist_envelope(
         self, envelope: ReturnEnvelope, state: RunState

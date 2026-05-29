@@ -19,7 +19,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from core.runtime import MinimalDispatcher, MockAgent
+from core.runtime import MinimalDispatcher, MockAgentBackend
 from core.workflows import (
     DEFAULT_AGENTS_DIR,
     DEFAULT_SKILLS_DIR,
@@ -136,7 +136,7 @@ def _cmd_run_mock(args: argparse.Namespace, *, out) -> int:
     from core.memory import JsonFileMemory  # imported lazily to keep CLI fast
 
     memory = JsonFileMemory(Path(args.root))
-    dispatcher = MinimalDispatcher(memory=memory, agent=MockAgent())
+    dispatcher = MinimalDispatcher(memory=memory, agent_backend=MockAgentBackend())
     summary = dispatcher.run(spec, client_slug=args.client)
     print(json.dumps(summary.model_dump(mode="json"), indent=2, default=str), file=out)
     return 0 if summary.status.value == "succeeded" else 1
