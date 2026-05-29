@@ -52,13 +52,13 @@ must say which block introduced it and which (estimated) block will resolve it.
 
 ### P-1C.2 — Strictness mode enforcers (qa_strict / dev_strict / design_strict / claim_strict)
 - **Introduced:** MKT-1C
-- **Why deferred:** Modes are caller policy (D-3.8), not schema. They belong in the dispatcher.
-- **Resolves at:** MKT-2A (minimal dispatcher) for the first mode, the rest as agents land.
+- **Status:** ⚠ partial — MKT-2A's dispatcher does NOT layer strict modes yet (mock envelopes are passed through `validate_envelope_strict` which is base schema only).
+- **Resolves at:** MKT-2B (Claude Code spawn) onwards, per mode.
 
 ### P-1C.3 — `predicate_kind` evaluators
 - **Introduced:** MKT-1C
-- **Why deferred:** The contract declares the kinds; evaluating them needs runtime state (envelopes seen, memory, filesystem).
-- **Resolves at:** MKT-2A onwards. Each block that introduces a phase ships the predicate(s) it needs.
+- **Status:** ⚠ partial — MKT-2A implements only `envelope_present` (registered in `core/runtime/predicates.py`). Note: the dispatcher today consults the in-memory `held_gates` set directly; the registry is in place for the moment phases declare predicates beyond simple gate presence.
+- **Resolves at:** per block. Remaining: `status_equals`, `claims_audit_present`, `no_unsafe_claims`, `memory_key_exists`, `artifact_exists`, `custom`.
 
 ### P-1C.4 — Hash classifier fragility
 - **Introduced:** MKT-1C
@@ -99,10 +99,10 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Why deferred:** Daily JSONL files grow without bound. A real deployment will need a retention policy (e.g. archive after 90 days).
 - **Resolves at:** when usage demands it.
 
-### P-1D.5 — `mkt memory inspect` CLI
+### P-1D.5 — `mkt memory inspect` CLI  ✅ RESOLVED in MKT-2A
 - **Introduced:** MKT-1D
-- **Why deferred:** Useful for debugging (`mkt memory list demo-co audience`, `mkt memory check demo-co`) but no runtime exists yet.
-- **Resolves at:** MKT-2A.
+- **Resolved at:** MKT-2A — `mkt memory inspect [--client SLUG]` available via the new `mkt` console script. Lists clients or, when a slug is given, prints per-kind entity counts plus audit-event count.
+- **Notes:** `mkt memory list <kind>` and `mkt memory check` (referential integrity walker) are still pending; tracked as P-2A.1.
 
 ### P-1B.1 — Schema versioning / migration policy (SUPERSEDED by P-1D.2)
 - This item is now tracked as **P-1D.2** above.
@@ -111,17 +111,16 @@ must say which block introduced it and which (estimated) block will resolve it.
 
 ## From MKT-1E (workflow + agent + skill specs)
 
-### P-1E.1 — Promote spec formats to versioned Pydantic contracts
+### P-1E.1 — Promote spec formats to versioned Pydantic contracts  ✅ partial in MKT-2A
 - **Introduced:** MKT-1E
-- **Why deferred:** MKT-1E intentionally documents `workflow-spec.v1`, `agent-spec.v1`, `skill-spec.v1` in prose and YAML, without binding them to Pydantic models. The right contract shape will emerge when the dispatcher tries to consume them.
-- **Resolves at:** MKT-2A.
-- **Sketch:** `core/contracts/specs/workflow.py`, `agent.py`, `skill.py` modeled on `envelope.v1` / `phase-gate.v1`.
+- **Status:** `workflow-spec.v1` promoted to Pydantic in `core/workflows/spec.py`. `agent-spec.v1` and `skill-spec.v1` remain frontmatter-only and are checked by the linter, not by a Pydantic model.
+- **Notes on placement:** the workflow spec lives in `core/workflows/`, not `core/contracts/` (ADR 0006 D-6.1) — workflow specs are loaded artifacts, distinct from transport contracts.
+- **Resolves at:** agent-spec / skill-spec promotion = MKT-2B when real agents land.
 
-### P-1E.2 — Spec linter
+### P-1E.2 — Spec linter  ✅ RESOLVED in MKT-2A
 - **Introduced:** MKT-1E
-- **Why deferred:** No tests exist for the specs themselves. Every `consumed_gate` should resolve to some `produced_gate`; every `agent_id` in a workflow should exist under `agents/`; every `skill_id` referenced by an agent should exist under `skills/`. Today these invariants are enforced by review, not code.
-- **Resolves at:** MKT-2A.
-- **Sketch:** `tools/lint_specs.py` walks `workflows/`, `agents/`, `skills/` and reports violations.
+- **Resolved at:** MKT-2A — `core/workflows/linter.py` with `lint_workflow_spec`, `lint_agent_file`, `lint_skill_file`, and the orchestrator `lint_all`. Exposed via `mkt validate-specs` (CLI).
+- **Notes:** real-repo lint is part of the test suite (`tests/workflows/test_spec_linter.py::test_lint_all_on_real_repo_has_no_errors`).
 
 ### P-1E.3 — Promote agents from `spec_only` to `implemented`
 - **Introduced:** MKT-1E
@@ -155,5 +154,44 @@ must say which block introduced it and which (estimated) block will resolve it.
 
 ### P-1E.9 — CSV / JSON import for `INTERNAL_REPORT` Metrics
 - **Introduced:** MKT-1E
-- **Why deferred:** v1 accepts Metric entities written via Memory. A small import helper would make humans faster but is not blocking.
-- **Resolves at:** MKT-2A (as part of the CLI surface).
+- **Status:** still deferred — MKT-2A's CLI does not include an import subcommand. The dispatcher proved the round-trip, but a user-friendly `mkt memory put` / `mkt memory import` is the actual blocker.
+- **Resolves at:** later iteration of CLI (tracked alongside P-2A.1).
+
+---
+
+## From MKT-2A (minimal dispatcher + spec linter + CLI)
+
+### P-2A.1 — Expand `mkt memory` CLI surface
+- **Introduced:** MKT-2A
+- **Why deferred:** v1 ships only `mkt memory inspect`. Useful additions: `mkt memory list <client> <kind>`, `mkt memory get <client> <kind> <id>`, `mkt memory check <client>` (referential integrity walker), `mkt memory put <client> <kind> <id> --from-file`, `mkt memory tail-audit <client>`.
+- **Resolves at:** as needed for debugging and ops.
+
+### P-2A.2 — Promote `agent-spec.v1` and `skill-spec.v1` to Pydantic contracts
+- **Introduced:** MKT-2A
+- **Why deferred:** MKT-2A's linter checks frontmatter shape but does not bind it to a Pydantic model. Promotion makes sense when the runtime starts loading agents to invoke them (not when it just lints their specs).
+- **Resolves at:** MKT-2B.
+
+### P-2A.3 — Claude Code subagent spawn backend
+- **Introduced:** MKT-2A
+- **Why deferred:** MKT-2A is mock-only by approved decision. The dispatcher already accepts an injectable agent (`MinimalDispatcher(memory, agent=...)`), so the swap is a single class.
+- **Resolves at:** MKT-2B with its own approval.
+
+### P-2A.4 — Parallel agents within a phase
+- **Introduced:** MKT-2A
+- **Why deferred:** W3.channel_mix lists three agents that conceptually run in parallel. v1 runs them sequentially. Correctness is unaffected for mocks; latency matters once real agents land.
+- **Resolves at:** MKT-2B.
+
+### P-2A.5 — Resume / retry policy
+- **Introduced:** MKT-2A
+- **Why deferred:** A failed run is final in v1. Future runs will need retry semantics (with backoff caps), and possibly resume-from-step semantics.
+- **Resolves at:** MKT-2C.
+
+### P-2A.6 — `WorkflowSpec` migration runner
+- **Introduced:** MKT-2A
+- **Why deferred:** Trivially folds into the broader migration runner (P-1D.2). Recorded here for traceability.
+- **Resolves at:** with P-1D.2.
+
+### P-2A.7 — Dispatcher should consult `predicates.evaluate` instead of `held_gates` only
+- **Introduced:** MKT-2A
+- **Why deferred:** The dispatcher today walks `gates_required_before` against an in-memory `held_gates` set. The predicate registry exists but is bypassed for the simple "gate held" case. Future predicate kinds (e.g. `no_unsafe_claims`) will need richer evaluation.
+- **Resolves at:** MKT-3 / MKT-2B when the first non-`envelope_present` predicate is needed.
