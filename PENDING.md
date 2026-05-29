@@ -222,3 +222,140 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-2B
 - **Why deferred:** `default_model` in specs is `opus | sonnet | haiku`. A real backend needs to resolve these to concrete model identifiers and override per invocation (e.g. retry with a stronger model). Out of scope today.
 - **Resolves at:** with `ClaudeCodeBackend` implementation.
+
+---
+
+## From MKT-2B/2C era (MCP integration roadmap — documentation only)
+
+> Full plan: `docs/mcp-roadmap.md`. This block introduced the roadmap; no
+> code, no MCP connection, no credential setup happened. Every entry below
+> resolves at its named MKT-MCP-N block, all of which are deferred until
+> post MKT-2C and require explicit phase-by-phase approval before
+> implementation.
+
+### P-MCP.1 — MCP registry doc (MKT-MCP-1)
+- **Introduced:** MKT-2B/2C (during MCP roadmap registration).
+- **Why deferred:** Phase 1 of the MCP roadmap is itself documentation.
+  Until MKT-2C closes, even adding a new doc carries scope risk.
+- **Resolves at:** MKT-MCP-1 — produces `docs/mcp-registry.md` listing
+  every MCP MKT will consider, with 7-filter eval status per entry.
+- **Sketch:** registry doc + per-MCP permission template (already drafted
+  in `mcp-roadmap.md` §"Permissions plan template").
+
+### P-MCP.2 — Domain contracts for external data (MKT-MCP-2)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** Contracts only make sense once MKT-2C settles the
+  current contract layer. Adding new Pydantic specs now risks churn.
+- **Resolves at:** MKT-MCP-2 — adds `ExternalDataSource`, `MCPToolRef`,
+  `ReadOnlyMetricQuery`, `MCPInsight` to `core/domain/`. Pure specs +
+  tests; no connector code.
+- **Sketch:** `ReadOnlyMetricQuery` includes a guard that rejects any
+  query whose tool name matches write verbs (`create|update|delete|pause|
+  resume|mutate|add|remove`).
+
+### P-MCP.3 — GA4 read-only adapter (MKT-MCP-3)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** First real MCP integration. Requires P-MCP.1 +
+  P-MCP.2 done, plus explicit approval per `mcp-roadmap.md` permissions
+  template.
+- **Resolves at:** MKT-MCP-3 — `integrations/ga4_adapter.py`. Scope
+  `analytics.readonly`. Produces `Metric` entities with `source=GA4`,
+  `is_estimate=false`, `confidence=1.0`. Fails open on missing credential.
+- **Parallel scope:** Google Drive / Sheets read-only for report fetching
+  in same block.
+
+### P-MCP.4 — Google Ads read-only adapter (MKT-MCP-4)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** Highest-risk source (write surface includes campaign
+  pause / budget mutation). Requires P-MCP.3 to establish the adapter
+  pattern first.
+- **Resolves at:** MKT-MCP-4 — `integrations/google_ads_adapter.py`.
+  Strict no-mutate gate: rejects tool names matching write verbs even if
+  the underlying MCP exposes them. New enum value `GOOGLE_ADS` in
+  `Metric.source` (tracked as a separate domain bump).
+
+### P-MCP.5 — Search Console / SEO source (MKT-MCP-5)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** Requires MCP adapter pattern from P-MCP.3.
+- **Resolves at:** MKT-MCP-5 — `integrations/search_console_adapter.py`.
+  Scope `webmasters.readonly`. Reads queries, impressions, CTR, position.
+  Produces `Metric` with `source=SEARCH_SEO`.
+
+### P-MCP.6 — Automated reporting agent goes live (MKT-MCP-6)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** `analytics-agent` is specced in MKT-1E but has no
+  real Metrics to consume until MCP-3/4/5 land.
+- **Resolves at:** MKT-MCP-6 — new skill `mcp-report-generator` fans out
+  read queries to every active `ExternalDataSource` and produces a
+  unified `MCPInsight`. Output: versioned `report.v1` memory entity. No
+  actions yet.
+
+### P-MCP.7 — Actionable recommendations + Gmail read-only (MKT-MCP-7)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** `optimizer-agent` needs `MCPInsight`s from MCP-6 to
+  produce meaningful recommendations.
+- **Resolves at:** MKT-MCP-7 — recommendations recorded as
+  `recommendation.v1` entities, NOT executed. Gmail MCP integration
+  read-only enters here (read inbox stats + existing drafts; no draft
+  creation, no send).
+
+### P-MCP.8 — Approved write actions via n8n / action layer (MKT-MCP-8)
+- **Introduced:** MKT-2B/2C.
+- **Why deferred:** First write surface. Requires every prior MCP phase
+  to be stable AND `approval-center` (already specced in
+  `docs/approval-center.md`) to be live.
+- **Resolves at:** MKT-MCP-8 — bridge between MKT recommendations and
+  n8n workflows (per `n8n-automation-roadmap.md` D-5.4). Per-action
+  human approval mandatory. Gmail draft creation, ad budget changes,
+  keyword additions all go through this gate.
+- **Sketch:** new contract `ApprovedActionEnvelope` linking
+  `recommendation.v1` + approval signature + n8n workflow id.
+
+### P-MCP.9 — ADR for MCP integration architecture  ✅ partial in MKT-2C
+- **Introduced:** MKT-2B/2C.
+- **Status:** Foundational ADR landed in MKT-2C as `docs/decisions/0008-mkt-2c-external-data-mcp-roadmap.md` (D-8.1..D-8.12 covering posture, mapping, phasing, policy, credentials, n8n execution role, audit reservations). The implementation-time ADR (where adapters live, caching policy, etc.) is still scheduled for the block that ships the first adapter.
+- **Resolves at:** with MKT-MCP-3 (implementation ADR `D-MCP.1`).
+
+---
+
+## From MKT-2C (external data & MCP roadmap)
+
+### P-2C.1 — Promote conceptual contracts to Pydantic
+- **Introduced:** MKT-2C
+- **Why deferred:** `ExternalDataSource`, `MCPToolRef`, `ReadOnlyMetricQuery`, `ExternalInsight`, `DataPermissionPolicy`, `MarketingRecommendation`, `ProposedAction` live as YAML sketches in `external-data-sources.md` and `permissions-policy.md`. Promotion happens when the first adapter consumes them (same pattern as MKT-1E specs).
+- **Resolves at:** MKT-MCP-2 (per `mcp-roadmap.md` phasing).
+
+### P-2C.2 — Per-source R3 implementations (read-only programmatic)
+- **Introduced:** MKT-2C
+- **Status:** seven roadmap docs in place (`mcp-roadmap.md`, `google-analytics-roadmap.md`, `google-ads-roadmap.md`, `search-console-roadmap.md`, `external-data-sources.md`, `permissions-policy.md`, `n8n-execution-roadmap.md`). No adapter exists.
+- **Resolves at:** per-source, MKT-MCP-3 (GA4 + Drive) → MKT-MCP-4 (Ads) → MKT-MCP-5 (GSC) → MKT-MCP-7 (Gmail).
+
+### P-2C.3 — Per-source R4 implementations (write with approval)
+- **Introduced:** MKT-2C
+- **Why deferred:** Each write phase needs its own ADR + the safety checklist from `permissions-policy.md` §5.2. Google Ads R4 additionally requires double-approval policy and per-call caps (per ADR 0008 D-8.7).
+- **Resolves at:** dedicated ADR per (source, write tool), only after the safety checklist is satisfied AND with explicit approval.
+
+### P-2C.4 — n8n trigger contract + webhook signing
+- **Introduced:** MKT-2C
+- **Why deferred:** Sketched in `n8n-execution-roadmap.md` §2; implementation (signing, ack listener, registry validation) belongs to MKT-MCP-8.
+- **Resolves at:** MKT-MCP-8.
+
+### P-2C.5 — Credentials adapter
+- **Introduced:** MKT-2C
+- **Why deferred:** Specs reference credentials by name only (`env(GA4_SERVICE_ACCOUNT_JSON)`). The resolver — including per-client vs agency-wide policy — only matters when the first real adapter lands.
+- **Resolves at:** MKT-MCP-3.
+
+### P-2C.6 — `ProposedAction` entity + state machine
+- **Introduced:** MKT-2C
+- **Why deferred:** Documented in `external-data-sources.md` §3.7 as a YAML sketch. Implementation as a `core.domain` entity + Approval-Center integration is the scope of the block that opens the first R4 phase.
+- **Resolves at:** with the first R4 source.
+
+### P-2C.7 — Audit event types for external integrations
+- **Introduced:** MKT-2C
+- **Why deferred:** Eleven event types reserved across `permissions-policy.md` §6 and `n8n-execution-roadmap.md` §6 (`external_fetch`, `external_fetch_failed`, `proposed_action_created/approved/executed/failed`, `external_action_rejected`, `n8n_trigger_dispatched/failed`, `n8n_action_completed/failed`). All additive to `audit-trail.v1`.
+- **Resolves at:** declared per integration block as the events become emitted.
+
+### P-2C.8 — Decide `MetricSource` enum strategy for Google Ads / YouTube
+- **Introduced:** MKT-2C
+- **Why deferred:** Reuse `social` with `dimensions.provider=google_ads` vs add first-class enum values (`google_ads`, `youtube`). Reversible at the cost of a domain-model bump.
+- **Resolves at:** with MKT-MCP-4 (Google Ads adapter block).

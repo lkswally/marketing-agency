@@ -29,11 +29,18 @@ In MVP, Metric entities are written by **humans** (entry as `MANUAL`) or by
 |--------|--------|-------------------|-------|
 | `MANUAL` | available now | MKT-1E | A human can write a Metric directly via Memory. |
 | `INTERNAL_REPORT` | available now | MKT-1E | CSV / JSON import script (deferred — fine for now). |
-| `GA4` | future | MKT-6B | Service-account JSON, property ID. Reads only. |
-| `SEARCH_SEO` | future | MKT-6B+ | Search Console first; Ahrefs / SEMrush only with paid keys. |
-| `EMAIL` | future | MKT-6A | Resend (preferred). Bounce / open / click. |
-| `SOCIAL` | future | post-MKT-6 | Per-platform OAuth complexity. |
-| `PUBLIC_FOOTPRINT` | future | post-MKT-6 | Mentions, press, reviews. Populated by research agents, not connectors. |
+| `GA4` | future | MKT-MCP-3 | Via approved GA4 MCP, `analytics.readonly` scope. See `mcp-roadmap.md`. |
+| `GOOGLE_ADS` | future | MKT-MCP-4 | New enum value (requires domain bump). Read-only, strict no-mutate gate. |
+| `SEARCH_SEO` | future | MKT-MCP-5 | Search Console MCP first; Ahrefs / SEMrush only with paid keys. |
+| `EMAIL` | future | MKT-MCP-7 | Resend (preferred). Bounce / open / click. Gmail MCP read-only enters here too. |
+| `SOCIAL` | future | post MKT-MCP-5 | Per-platform OAuth complexity. YouTube first; others case-by-case. |
+| `PUBLIC_FOOTPRINT` | future | post MKT-MCP-5 | Mentions, press, reviews. Research agents + possibly Firecrawl MCP. |
+
+> **MCP integration**: every external data source above is delivered
+> through an MCP adapter governed by `docs/mcp-roadmap.md`. The phase ids
+> `MKT-MCP-N` map directly to the phases in that document. Read-only is
+> mandatory in Phases 1–7. The only write surface is Phase 8 via n8n with
+> explicit human approval.
 
 ## Digital footprint specifically
 
