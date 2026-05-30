@@ -338,6 +338,96 @@ def _cmd_build_creatives(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_build_visuals(args: argparse.Namespace, *, out) -> int:
+    """Build a Visual Direction Pack from the persisted strategy + creative pack.
+
+    Loads the persisted ``CampaignStrategyReport``, the latest ``ApprovalPack``
+    and the latest ``CreativeAssetPack`` (when present). Runs the
+    :class:`VisualPromptFactory`, persists the resulting ``VisualDirectionPack``
+    to memory and writes Markdown + JSON to ``--outputs-dir``.
+    """
+    from core.approval import (
+        APPROVAL_PACK_KIND,
+        ApprovalPack,
+    )
+    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON_ID
+    from core.creative import (
+        CREATIVE_PACK_KIND,
+        CreativeAssetPack,
+    )
+    from core.creative import SINGLETON_ID as CREATIVE_SINGLETON_ID
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
+    from core.visual import VisualPromptFactory, render_markdown_pack
+
+    memory = JsonFileMemory(Path(args.root))
+    try:
+        report_raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
+    except EntityNotFound:
+        print(
+            f"error: no CampaignStrategyReport for client {args.client!r} "
+            f"under {args.root}; run `mkt run-strategy` first.",
+            file=out,
+        )
+        return 2
+    report = CampaignStrategyReport.model_validate(report_raw)
+
+    approval_pack: ApprovalPack | None = None
+    try:
+        ap_raw = memory.get(args.client, APPROVAL_PACK_KIND, APPROVAL_SINGLETON_ID)
+        approval_pack = ApprovalPack.model_validate(ap_raw)
+    except EntityNotFound:
+        approval_pack = None
+
+    creative_pack: CreativeAssetPack | None = None
+    try:
+        cp_raw = memory.get(args.client, CREATIVE_PACK_KIND, CREATIVE_SINGLETON_ID)
+        creative_pack = CreativeAssetPack.model_validate(cp_raw)
+    except EntityNotFound:
+        creative_pack = None
+
+    if (
+        getattr(args, "require_approval", False)
+        and approval_pack is not None
+        and approval_pack.blocks_publish
+    ):
+        print(
+            "error: --require-approval set but the Approval Pack blocks publish",
+            file=out,
+        )
+        return 3
+
+    factory = VisualPromptFactory(memory=memory)
+    pack = factory.build(report, approval_pack, creative_pack)
+    factory.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "visual-direction-pack.md"
+    md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
+    json_path = outputs_dir / "visual-direction-pack.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "report_id": pack.report_id,
+        "approval_pack_id": pack.approval_pack_id,
+        "creative_pack_id": pack.creative_pack_id,
+        "derived_overall_state": pack.derived_overall_state.value,
+        "blocks_publish": pack.blocks_publish,
+        "total_directions": pack.total_directions,
+        "total_prompt_variants": pack.total_prompt_variants,
+        "count_by_state": pack.count_by_state(),
+        "count_risks_by_severity": pack.count_risks_by_severity(),
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 # -------- parser --------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -460,6 +550,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="fail with exit 3 when the Approval Pack blocks publish",
     )
     p_bc.set_defaults(func=_cmd_build_creatives)
+
+    # build-visuals
+    p_bv = subs.add_parser(
+        "build-visuals",
+        help="build a Visual Direction Pack (prompts + specs per piece type)",
+    )
+    p_bv.add_argument("--client", required=True, help="client slug")
+    p_bv.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_bv.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the Markdown + JSON outputs are written (default: outputs/)",
+    )
+    p_bv.add_argument(
+        "--require-approval",
+        action="store_true",
+        help="fail with exit 3 when the Approval Pack blocks publish",
+    )
+    p_bv.set_defaults(func=_cmd_build_visuals)
 
     return parser
 

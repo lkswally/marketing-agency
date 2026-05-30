@@ -510,3 +510,57 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-3C
 - **Why deferred:** Events are wrapped in `note` with `payload.creative_pack.action`. Same trade-off as MKT-3B's approval events — wait for a batch promotion to `audit-trail.v2`.
 - **Resolves at:** bundled with the next audit-trail bump.
+
+---
+
+## From MKT-3D (visual direction & image prompt pack)
+
+### P-3D.1 — LLM-backed visual prompt generation
+- **Introduced:** MKT-3D
+- **Why deferred:** Variants are template-driven (A: editorial, B: bold typographic). LLM-backed generation would produce richer, more contextual prompts but requires the safety boundaries in `docs/runtime/agent-backend-safety.md`.
+- **Resolves at:** dedicated block, post Claude Code safety + explicit approval. The deterministic generators in `core/visual/prompt_factory.py` remain the regression baseline.
+
+### P-3D.2 — Real image generation from the prompts
+- **Introduced:** MKT-3D
+- **Why deferred:** The Visual Direction Pack is 100% text. Real image generation introduces cost, IP, hosting and safety considerations distinct from prompt generation.
+- **Resolves at:** post-MCP / Replicate / image-gen integration block. Will land as a separate adapter (`integrations/image_*.py`) consuming `VisualPromptVariant.full_prompt_text` + `negative_prompt`.
+
+### P-3D.3 — Three or more prompt variants per piece type
+- **Introduced:** MKT-3D
+- **Why deferred:** v1 ships two variants per piece (A: editorial, B: bold). Three would multiply combinations without proportional analytical benefit at this stage.
+- **Resolves at:** continuation block when A/B outcomes reveal which axes matter.
+
+### P-3D.4 — Per-client custom visual style overrides
+- **Introduced:** MKT-3D
+- **Why deferred:** Style guide is template-driven from the report. A per-client `data/clients/<slug>/visual/style.yaml` override would let agencies pin brand-specific palettes / typography.
+- **Resolves at:** when a client needs override-by-default behavior.
+
+### P-3D.5 — Import `Brand.visual_rules` from MKT-1B into the style guide
+- **Introduced:** MKT-3D
+- **Why deferred:** `Brand.visual_rules` exists as a dict in the domain model but the strategy engine does not populate it from the input brief yet. When it does, the visual factory should consume it instead of defaulting.
+- **Resolves at:** when brand visual rules are actively populated.
+
+### P-3D.6 — Figma frame export
+- **Introduced:** MKT-3D
+- **Why deferred:** The pack carries enough information (dimensions, safe zones, hex palette) to scaffold Figma frames programmatically via their API. Out of scope for v1.
+- **Resolves at:** as needed.
+
+### P-3D.7 — Outcome tracking (A vs B winner) for visual prompts
+- **Introduced:** MKT-3D
+- **Why deferred:** Variants ship with stable ids (A, B) and tagged styles. Attribution requires a publishing surface and an analytics adapter.
+- **Resolves at:** when MKT-MCP-8 (publish) and MKT-MCP-3 (analytics) both exist.
+
+### P-3D.8 — Image-content audit
+- **Introduced:** MKT-3D (paired with P-3B.9).
+- **Why deferred:** The claim auditor (MKT-3B) is text-only. Once images are generated, they need their own audit pass (brand safety, generated text on image, depictions, copyright).
+- **Resolves at:** post image-gen block.
+
+### P-3D.9 — `mkt visual diff` / preview CLI affordances
+- **Introduced:** MKT-3D
+- **Why deferred:** v1 ships `mkt build-visuals` and nothing else visual-specific.
+- **Resolves at:** as operational need appears.
+
+### P-3D.10 — Promote `visual_pack` audit events to `audit-trail.v2`
+- **Introduced:** MKT-3D
+- **Why deferred:** Events are wrapped in `note` with `payload.visual_pack.action`. Same trade-off as MKT-3B/3C. Will batch with other promotions.
+- **Resolves at:** bundled with the next audit-trail bump.
