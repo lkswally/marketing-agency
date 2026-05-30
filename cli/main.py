@@ -258,6 +258,86 @@ def _cmd_audit_strategy(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_build_creatives(args: argparse.Namespace, *, out) -> int:
+    """Build a Creative Asset Pack from a persisted strategy + optional approval.
+
+    Loads the persisted ``CampaignStrategyReport`` for ``--client`` and (if
+    present) the latest ``ApprovalPack``, runs the :class:`CreativeFactory`,
+    persists the resulting ``CreativeAssetPack`` to memory and writes
+    Markdown + JSON to ``--outputs-dir``.
+    """
+    from core.approval import (
+        APPROVAL_PACK_KIND,
+        ApprovalPack,
+    )
+    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON_ID
+    from core.creative import (
+        CreativeFactory,
+        render_markdown_pack,
+    )
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
+
+    memory = JsonFileMemory(Path(args.root))
+    try:
+        report_raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
+    except EntityNotFound:
+        print(
+            f"error: no CampaignStrategyReport for client {args.client!r} "
+            f"under {args.root}; run `mkt run-strategy` first.",
+            file=out,
+        )
+        return 2
+    report = CampaignStrategyReport.model_validate(report_raw)
+
+    approval_pack: ApprovalPack | None = None
+    try:
+        ap_raw = memory.get(args.client, APPROVAL_PACK_KIND, APPROVAL_SINGLETON_ID)
+        approval_pack = ApprovalPack.model_validate(ap_raw)
+    except EntityNotFound:
+        # No audit ran yet — the factory defaults to a conservative state.
+        approval_pack = None
+
+    if (
+        getattr(args, "require_approval", False)
+        and approval_pack is not None
+        and approval_pack.blocks_publish
+    ):
+        print(
+            "error: --require-approval set but the Approval Pack blocks publish",
+            file=out,
+        )
+        return 3
+
+    factory = CreativeFactory(memory=memory)
+    pack = factory.build(report, approval_pack)
+    factory.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "creative-pack.md"
+    md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
+    json_path = outputs_dir / "creative-pack.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "report_id": pack.report_id,
+        "approval_pack_id": pack.approval_pack_id,
+        "derived_overall_state": pack.derived_overall_state.value,
+        "blocks_publish": pack.blocks_publish,
+        "total_assets": pack.total_assets,
+        "count_by_kind": pack.count_by_kind(),
+        "count_by_state": pack.count_by_state(),
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 # -------- parser --------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -357,6 +437,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the Approval Pack Markdown is written (default: outputs/)",
     )
     p_as.set_defaults(func=_cmd_audit_strategy)
+
+    # build-creatives
+    p_bc = subs.add_parser(
+        "build-creatives",
+        help="build a CreativeAssetPack from the persisted strategy + approval pack",
+    )
+    p_bc.add_argument("--client", required=True, help="client slug")
+    p_bc.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_bc.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the Markdown + JSON outputs are written (default: outputs/)",
+    )
+    p_bc.add_argument(
+        "--require-approval",
+        action="store_true",
+        help="fail with exit 3 when the Approval Pack blocks publish",
+    )
+    p_bc.set_defaults(func=_cmd_build_creatives)
 
     return parser
 

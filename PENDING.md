@@ -456,3 +456,57 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-3B
 - **Why deferred:** The auditor checks text only. When image generation lands, images will need their own audit (brand safety, generated text, depictions).
 - **Resolves at:** post image-gen block.
+
+---
+
+## From MKT-3C (creative factory pack)
+
+### P-3C.1 — LLM-backed copy generation
+- **Introduced:** MKT-3C
+- **Why deferred:** Variants are deterministic template rotations. LLM-backed generation would produce richer, more contextual A/B variants but requires the safety boundaries in `docs/runtime/agent-backend-safety.md`.
+- **Resolves at:** dedicated block, post Claude Code safety + explicit approval. The deterministic templates in `core/creative/factory.py` remain the regression baseline.
+
+### P-3C.2 — Real image generation from prompts
+- **Introduced:** MKT-3C
+- **Why deferred:** `ImagePromptAsset` produces ready-to-paste prompts; no image API is called. Image generation has its own cost / IP / hosting trade-offs.
+- **Resolves at:** post-MCP / Replicate integration block.
+
+### P-3C.3 — Workflow-level integration with W7
+- **Introduced:** MKT-3C
+- **Why deferred:** The creative pack is built post-hoc by a separate CLI command, not as a phase of W7 (the strategy workflow). Wiring it in would couple two distinct concerns.
+- **Resolves at:** when the operational pipeline (`strategy → audit → build-creatives`) needs to live as a single workflow run.
+
+### P-3C.4 — Versioned packs (history / diff)
+- **Introduced:** MKT-3C
+- **Why deferred:** v1 uses singleton id `"current"`. Re-running overwrites. Versioned history would be useful for comparing variants over time.
+- **Resolves at:** when an operational case demands it.
+
+### P-3C.5 — Per-channel format adaptation beyond default flyers
+- **Introduced:** MKT-3C
+- **Why deferred:** v1 produces three flyer formats (1:1, 4:5, 9:16). Adapting copy to Reels-as-Story vs LinkedIn carousel vs IG static would need a per-format template registry.
+- **Resolves at:** continuation block when channel-specific outputs are required.
+
+### P-3C.6 — Outcome tracking (A vs B winner)
+- **Introduced:** MKT-3C
+- **Why deferred:** A/B variants ship with stable ids and tagged angles/styles. There is no analytics layer yet to attribute results.
+- **Resolves at:** when a publishing surface (MKT-MCP-8) and a metrics adapter (MKT-MCP-3) both exist.
+
+### P-3C.7 — ICS / Google Calendar export
+- **Introduced:** MKT-3C
+- **Why deferred:** The pack carries dates per asset. Exporting as an `.ics` file or pushing to a Google Calendar is integration plumbing, not a missing capability.
+- **Resolves at:** as needed.
+
+### P-3C.8 — `mkt creative diff` / preview / publish CLI affordances
+- **Introduced:** MKT-3C
+- **Why deferred:** v1 ships `mkt build-creatives` and nothing else creative-specific.
+- **Resolves at:** as operational need appears.
+
+### P-3C.9 — `PublicationLog` entity (separate from pack state)
+- **Introduced:** MKT-3C
+- **Why deferred:** ADR 0011 D-11.12 explicitly decided that the pack does NOT carry a `PUBLISHED` state. A future publisher writes a separate log. The log's shape is not yet defined.
+- **Resolves at:** with the first publisher block (MKT-MCP-8 or per-source adapter).
+
+### P-3C.10 — Promote `creative_pack` audit events to `audit-trail.v2`
+- **Introduced:** MKT-3C
+- **Why deferred:** Events are wrapped in `note` with `payload.creative_pack.action`. Same trade-off as MKT-3B's approval events — wait for a batch promotion to `audit-trail.v2`.
+- **Resolves at:** bundled with the next audit-trail bump.
