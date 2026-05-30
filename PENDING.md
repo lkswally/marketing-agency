@@ -374,15 +374,14 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Status:** still `spec_only`. W7 references agents by `agent_id` for documentation, but `TemplatedStrategyBackend` does the actual work without invoking the agents in the spawn sense.
 - **Resolves at:** with LLM-backed generators (P-3A.1).
 
-### P-3A.3 — Claim audit enforcement on the strategy report
+### P-3A.3 — Claim audit enforcement on the strategy report  ✅ RESOLVED in MKT-3B
 - **Introduced:** MKT-3A
-- **Why deferred:** Section 19 of the report flags `requires_compliance_audit: true` and lists unverified claims. The compliance gate (`claim_strict` mode, `g_compliance_passed`) is not wired into W7.
-- **Resolves at:** MKT-3B.
+- **Resolved at:** MKT-3B — `core/approval/` ships `ClaimAuditor` + `ApprovalPack` (`approval-pack.v1`). 22 default rules covering 12 risk categories. `blocks_publish` policy in place for future publishers to honor.
 
 ### P-3A.4 — Approval Center halt-and-wait
 - **Introduced:** MKT-3A (carries P-1E.5).
-- **Status:** W7 declares `human_required_at: [approval]` but the dispatcher does not pause. The block ships the data shape; wiring the actual human gate is post-MKT-3B.
-- **Resolves at:** MKT-3B / dedicated Approval Center implementation block.
+- **Status:** ⚠ partial — MKT-3B ships the data the Approval Center will consume (`ApprovalPack` with state machine). The dispatcher still does not halt mid-workflow at `g_approval_packaged`. The formal `Approval` entity from `docs/approval-center.md` remains unimplemented.
+- **Resolves at:** dedicated Approval Center implementation block (post-MKT-3B).
 
 ### P-3A.5 — Versioned strategies per client
 - **Introduced:** MKT-3A
@@ -406,5 +405,54 @@ must say which block introduced it and which (estimated) block will resolve it.
 
 ### P-3A.9 — Direct integration with Approval Center entities
 - **Introduced:** MKT-3A
-- **Why deferred:** `ApprovalChecklist` is a section in the report, NOT the `approval` entity defined in `docs/approval-center.md`. The two should merge when the Approval Center implementation lands.
+- **Status:** ⚠ partial — MKT-3B's `ApprovalPack` is the input artifact a real Approval Center will consume. The `Approval` entity from `docs/approval-center.md` (with `PROPOSED → IN_REVIEW → APPROVED | REJECTED | NEEDS_REVISION` state machine) still does not exist as a domain entity.
 - **Resolves at:** Approval Center implementation block.
+
+---
+
+## From MKT-3B (claim audit + approval pack)
+
+### P-3B.1 — LLM-backed claim detection
+- **Introduced:** MKT-3B
+- **Why deferred:** Regex rules catch obvious risky language. An LLM-augmented detector would catch paraphrases and tone-level risks the rules miss. Requires the safety boundaries from `docs/runtime/agent-backend-safety.md`.
+- **Resolves at:** dedicated block, post-ClaudeCodeBackend approval. The deterministic rules in `core/approval/claim_auditor.py` stay as the regression baseline.
+
+### P-3B.2 — Workflow-level halt at `g_approval_packaged`
+- **Introduced:** MKT-3B
+- **Why deferred:** The dispatcher (MKT-2A) does not pause mid-run. The pack records state and `blocks_publish`, but the workflow still runs to completion.
+- **Resolves at:** with the Approval Center implementation block.
+
+### P-3B.3 — Promote approval audit events to first-class `audit-trail.v2` types
+- **Introduced:** MKT-3B
+- **Why deferred:** Today the pack lifecycle events are emitted as `event_type=note` with a `payload.approval_pack.action` discriminator. Promotion to first-class types (`approval_pack_created`, `approval_pack_approved`, etc.) is additive but premature without a bundle of external integrations also needing new types.
+- **Resolves at:** with the first external publisher block (likely MKT-MCP-8) — bundle all reserved event types into a single `audit-trail.v2` bump.
+
+### P-3B.4 — Per-client custom rule sets loaded from disk
+- **Introduced:** MKT-3B
+- **Why deferred:** `ClaimAuditor(rules=...)` already accepts a custom rule list programmatically. A YAML/JSON loader for `data/clients/<slug>/approval/rules.yaml` is just plumbing.
+- **Resolves at:** when a client needs override rules.
+
+### P-3B.5 — `mkt approve` / `mkt reject` CLI subcommands
+- **Introduced:** MKT-3B
+- **Why deferred:** The Python API (`ApprovalPackBuilder.approve(...)` / `.reject(...)`) is the source of truth. CLI subcommands are convenience for ops scripts.
+- **Resolves at:** when the operational case demands it.
+
+### P-3B.6 — Versioned packs (history / diff)
+- **Introduced:** MKT-3B
+- **Why deferred:** v1 uses singleton id `"current"`. Re-auditing overwrites. Versioned history is useful for "what changed since my last review?" but not blocking v1.
+- **Resolves at:** dedicated block when reviewer workflow demands it.
+
+### P-3B.7 — External publishers honoring `blocks_publish`
+- **Introduced:** MKT-3B
+- **Why deferred:** The flag is set; no publisher exists in MKT-3B to consult it.
+- **Resolves at:** MKT-MCP-8 (n8n trigger), per-source publish blocks.
+
+### P-3B.8 — Source-aware evidence linking
+- **Introduced:** MKT-3B
+- **Why deferred:** Detections support `evidence_refs: list[str]` but the auditor does not populate them. Linking detections to `Evidence` entities (MKT-1B) requires a knowledge-base lookup or per-client evidence registry.
+- **Resolves at:** continuation block when a real evidence catalogue exists.
+
+### P-3B.9 — Image-content audit
+- **Introduced:** MKT-3B
+- **Why deferred:** The auditor checks text only. When image generation lands, images will need their own audit (brand safety, generated text, depictions).
+- **Resolves at:** post image-gen block.

@@ -183,7 +183,78 @@ def _cmd_run_strategy(args: argparse.Namespace, *, out) -> int:
         else None,
         "envelope_count": len(result.summary.envelope_refs),
     }
+
+    # Optional chained audit + approval pack generation.
+    if getattr(args, "audit", False):
+        audit_payload = _do_audit_pack(
+            memory=memory,
+            client_slug=result.report.client_slug,
+            report=result.report,
+            outputs_dir=outputs_dir,
+        )
+        payload["approval_pack"] = audit_payload
+
     print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _do_audit_pack(*, memory, client_slug, report, outputs_dir: Path) -> dict:
+    """Internal helper used by `run-strategy --audit` and `audit-strategy`."""
+    from core.approval import ApprovalPackBuilder, render_markdown_pack
+
+    builder = ApprovalPackBuilder(memory=memory)
+    pack = builder.build_from_report(report)
+    builder.persist(pack)
+
+    pack_md_path = outputs_dir / "approval-pack.md"
+    pack_md_path.parent.mkdir(parents=True, exist_ok=True)
+    pack_md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
+
+    return {
+        "pack_id": pack.pack_id,
+        "state": pack.state.value,
+        "overall_severity": pack.overall_severity.value,
+        "blocks_publish": pack.blocks_publish,
+        "total_detections": pack.total_detections,
+        "human_review_required_count": pack.human_review_required_count,
+        "pack_markdown_path": str(pack_md_path),
+        "client_slug": client_slug,
+        "report_id": report.report_id,
+        "rule_set_id": pack.rule_set_id,
+    }
+
+
+def _cmd_audit_strategy(args: argparse.Namespace, *, out) -> int:
+    """Audit a previously-persisted CampaignStrategyReport.
+
+    Loads the strategy report for ``--client`` from memory, builds the
+    :class:`ApprovalPack`, persists it, and writes the Markdown rendering
+    to ``--outputs-dir``.
+    """
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
+
+    memory = JsonFileMemory(Path(args.root))
+    try:
+        raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
+    except EntityNotFound:
+        print(
+            f"error: no CampaignStrategyReport for client {args.client!r} "
+            f"under {args.root}; run `mkt run-strategy` first.",
+            file=out,
+        )
+        return 2
+
+    report = CampaignStrategyReport.model_validate(raw)
+    outputs_dir = Path(args.outputs_dir)
+
+    audit_payload = _do_audit_pack(
+        memory=memory,
+        client_slug=args.client,
+        report=report,
+        outputs_dir=outputs_dir,
+    )
+    print(json.dumps(audit_payload, indent=2, default=str), file=out)
     return 0
 
 
@@ -262,7 +333,30 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outputs",
         help="directory where the Markdown report is written (default: outputs/)",
     )
+    p_rs.add_argument(
+        "--audit",
+        action="store_true",
+        help="chain a claim audit + Approval Pack generation after the strategy run",
+    )
     p_rs.set_defaults(func=_cmd_run_strategy)
+
+    # audit-strategy
+    p_as = subs.add_parser(
+        "audit-strategy",
+        help="audit a persisted CampaignStrategyReport and produce an Approval Pack",
+    )
+    p_as.add_argument("--client", required=True, help="client slug")
+    p_as.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_as.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the Approval Pack Markdown is written (default: outputs/)",
+    )
+    p_as.set_defaults(func=_cmd_audit_strategy)
 
     return parser
 
