@@ -142,6 +142,51 @@ def _cmd_run_mock(args: argparse.Namespace, *, out) -> int:
     return 0 if summary.status.value == "succeeded" else 1
 
 
+def _cmd_run_strategy(args: argparse.Namespace, *, out) -> int:
+    """Run W7 (campaign strategy engine) against an input brief.
+
+    Output:
+    - persists every intermediate strategy artifact to JsonFileMemory.
+    - writes the final Markdown report to ``--outputs-dir/<client>/<filename>``.
+    - prints a small JSON summary to stdout.
+    """
+    from core.memory import JsonFileMemory
+    from core.strategy import StrategyPipeline, StrategyPipelineError
+
+    brief_path = Path(args.brief)
+    if not brief_path.exists():
+        print(f"error: brief file not found: {brief_path}", file=out)
+        return 2
+
+    memory = JsonFileMemory(Path(args.root))
+    pipeline = StrategyPipeline(memory=memory)
+
+    outputs_dir = Path(args.outputs_dir)
+    report_path = outputs_dir / "campaign-strategy.md"
+
+    try:
+        result = pipeline.run_from_path(brief_path, write_markdown_to=report_path)
+    except StrategyPipelineError as e:
+        print(f"error: {e}", file=out)
+        return 1
+    except Exception as e:  # noqa: BLE001 — surface validation errors as exit-2
+        print(f"error: invalid brief: {e}", file=out)
+        return 2
+
+    payload = {
+        "status": result.summary.status.value,
+        "run_id": result.summary.run_id,
+        "report_id": result.report.report_id,
+        "client_slug": result.report.client_slug,
+        "report_markdown_path": str(result.report_markdown_path)
+        if result.report_markdown_path
+        else None,
+        "envelope_count": len(result.summary.envelope_refs),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 # -------- parser --------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -196,6 +241,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"memory root (default: {DEFAULT_DATA_ROOT})",
     )
     p_rm.set_defaults(func=_cmd_run_mock)
+
+    # run-strategy
+    p_rs = subs.add_parser(
+        "run-strategy",
+        help="run the W7 campaign strategy engine on a brief JSON file",
+    )
+    p_rs.add_argument(
+        "--brief",
+        required=True,
+        help="path to the strategy input brief JSON file",
+    )
+    p_rs.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_rs.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the Markdown report is written (default: outputs/)",
+    )
+    p_rs.set_defaults(func=_cmd_run_strategy)
 
     return parser
 

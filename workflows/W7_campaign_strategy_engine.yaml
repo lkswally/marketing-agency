@@ -1,0 +1,107 @@
+workflow_id: W7_campaign_strategy_engine
+version: 1
+spec_version: workflow-spec.v1
+description: |
+  Campaign Strategy Engine (MKT-3A). Takes a structured StrategyInputBrief
+  (pre-loaded by the CLI / pipeline) and produces a complete
+  CampaignStrategyReport with 20 sections covering diagnosis, audience,
+  positioning, channels, keywords, creative, schedule, approval and risks.
+
+  Backend: core.strategy.TemplatedStrategyBackend (deterministic, LLM-free).
+  No external APIs, no MCP connections, no Claude Code spawn.
+
+phases:
+  - id: intake
+    description: Verify the input brief is persisted in memory.
+    agents: [mkt-orchestrator]
+    gates_required_before: []
+    gates_produced: [g_brief_captured]
+    outputs: [strategy_input_brief]
+
+  - id: diagnose
+    description: Produce a business diagnosis from the brief.
+    agents: [mkt-orchestrator]
+    gates_required_before: [g_brief_captured]
+    gates_produced: [g_diagnosis_drafted]
+    outputs: [strategy_diagnosis]
+
+  - id: audience
+    description: Generate target audience and buyer persona.
+    agents: [audience-researcher]
+    gates_required_before: [g_brief_captured]
+    gates_produced: [g_audience_research_complete]
+    outputs: [strategy_target_audience, strategy_buyer_persona]
+
+  - id: competitor
+    description: Build the competitor benchmark from provided rivals.
+    agents: [competitor-benchmark-agent]
+    gates_required_before: [g_brief_captured]
+    gates_produced: [g_competitor_baseline]
+    outputs: [strategy_competitor_benchmark]
+
+  - id: positioning
+    description: Draft the value proposition.
+    agents: [brand-strategist]
+    gates_required_before: [g_audience_research_complete]
+    gates_produced: [g_positioning_drafted]
+    outputs: [strategy_value_proposition]
+
+  - id: channels
+    description: Recommend channels with priority and cadence.
+    agents: [channel-advisor-agent]
+    gates_required_before: [g_audience_research_complete, g_positioning_drafted]
+    gates_produced: [g_channels_proposed]
+    outputs: [strategy_channel_recommendation]
+
+  - id: keywords
+    description: Produce keyword clusters, negatives and hashtags.
+    agents: [keyword-intelligence-agent]
+    gates_required_before: [g_positioning_drafted]
+    gates_produced: [g_keywords_drafted]
+    outputs: [strategy_keyword_plan]
+
+  - id: creative
+    description: |
+      Generate campaign strategy, suggested pieces, creative briefs,
+      social copies, email sequence and reels scripts.
+    agents: [creative-director]
+    gates_required_before: [g_channels_proposed, g_keywords_drafted]
+    gates_produced: [g_creatives_drafted]
+    outputs:
+      - strategy_campaign_strategy
+      - strategy_suggested_pieces
+      - strategy_creative_brief_pack
+      - strategy_social_posts
+      - strategy_email_sequence
+      - strategy_reels_pack
+
+  - id: calendar
+    description: Produce the weekly calendar of pieces by channel.
+    agents: [mkt-orchestrator]
+    gates_required_before: [g_creatives_drafted]
+    gates_produced: [g_schedule_drafted]
+    outputs: [strategy_schedule]
+
+  - id: report
+    description: Assemble the CampaignStrategyReport (partial — approval section pending).
+    agents: [mkt-orchestrator]
+    gates_required_before: [g_schedule_drafted, g_competitor_baseline, g_diagnosis_drafted]
+    gates_produced: [g_report_drafted]
+    outputs: [campaign_strategy_report]
+
+  - id: approval
+    description: |
+      Generate the approval checklist + risk assessment and merge into the
+      final CampaignStrategyReport.
+    agents: [approval-manager]
+    gates_required_before: [g_report_drafted]
+    gates_produced: [g_approval_packaged]
+    outputs: [strategy_approval_checklist, strategy_risk_assessment, campaign_strategy_report]
+
+approval:
+  state_machine: standard
+  human_required_at: [approval]
+
+notes:
+  - "Deterministic backend — outputs are template-driven, not LLM-driven."
+  - "Promotion to LLM-backed requires the safety boundaries in docs/runtime/agent-backend-safety.md."

@@ -1,0 +1,76 @@
+{
+  "schema_version": "strategy-input-brief.v1",
+  "client": {
+    "slug": "demo-saas",
+    "name": "Demo SaaS",
+    "industry": "marketing automation",
+    "locale": "es-AR"
+  },
+  "brand": {
+    "name": "Demo",
+    "mission": "Ayudar a equipos chicos a hacer marketing sin contratar un ops engineer.",
+    "tone_words": ["claro", "directo", "irreverente"],
+    "lexicon_do": ["equipos", "lanzar", "iterar"],
+    "lexicon_dont": ["sinergia", "potenciar", "engagement holístico"],
+    "banned_words": ["disruptivo"],
+    "claim_style": "Específico, con fuente, sin superlativos vacíos."
+  },
+  "product": {
+    "name": "Demo Pro",
+    "offer_type": "subscription",
+    "description": "Suite de automatización de marketing para equipos chicos.",
+    "value_props": [
+      "Setup en menos de un día",
+      "Sin contratos largos",
+      "Diseñado para equipos de hasta 5 personas"
+    ],
+    "price_amount": 49,
+    "price_currency": "USD"
+  },
+  "objective": "Generar 200 trials calificados por mes en LATAM durante el próximo trimestre.",
+  "audience_hints": [
+    {
+      "label": "Fundadores de SaaS bootstrapped",
+      "description": "Solo fundadores o equipos chicos sin capital de riesgo.",
+      "demographics": {
+        "age_range": "28-45",
+        "geo": "LATAM",
+        "occupation": "Fundador/a de SaaS"
+      },
+      "psychographics": {
+        "motivation": "independencia",
+        "fear": "burnout",
+        "pains": "wears every hat|no tiene tiempo para marketing"
+      },
+      "preferred_channels": ["newsletter", "x", "podcast"],
+      "estimated_size": 120000
+    }
+  ],
+  "constraints": [
+    "No usar paid ads en el primer mes",
+    "Voz del fundador como narrador principal"
+  ],
+  "preferred_channels": ["newsletter", "blog", "x"],
+  "competitors_known": [
+    {
+      "name": "Acme Marketing Suite",
+      "url": "https://acme.example",
+      "positioning_summary": "Suite enterprise para equipos grandes.",
+      "strengths": ["Marca conocida", "Integraciones profundas"],
+      "weaknesses": ["Caro", "Setup lento"]
+    },
+    {
+      "name": "Big SaaS",
+      "url": "https://big-saas.example",
+      "positioning_summary": "Todo-en-uno para empresas medianas.",
+      "strengths": ["Soporte 24/7"],
+      "weaknesses": ["Contratos anuales", "Onboarding 2 semanas"]
+    }
+  ],
+  "budget_amount": 4500,
+  "budget_currency": "USD",
+  "deadline": "2026-09-30",
+  "duration_weeks": 8,
+  "primary_kpi": "qualified_trials",
+  "additional_context": "El cliente quiere foco en LATAM Spanish-speaking; voz del fundador es relevante."
+}

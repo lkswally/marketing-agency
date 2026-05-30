@@ -359,3 +359,52 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-2C
 - **Why deferred:** Reuse `social` with `dimensions.provider=google_ads` vs add first-class enum values (`google_ads`, `youtube`). Reversible at the cost of a domain-model bump.
 - **Resolves at:** with MKT-MCP-4 (Google Ads adapter block).
+
+---
+
+## From MKT-3A (campaign strategy engine)
+
+### P-3A.1 — LLM-backed strategy generators
+- **Introduced:** MKT-3A
+- **Why deferred:** MKT-3A's generators are template-driven on purpose. Real LLM generation is more expressive but requires the safety boundaries in `docs/runtime/agent-backend-safety.md` to be in place.
+- **Resolves at:** dedicated block, after `ClaudeCodeBackend` safety checklist is satisfied AND with explicit user approval. The deterministic generators in `core/strategy/templates.py` stay as the regression baseline.
+
+### P-3A.2 — Promote MKT-1E agent specs from `spec_only` to `implemented`
+- **Introduced:** MKT-1E (P-1E.3) → reaffirmed at MKT-3A.
+- **Status:** still `spec_only`. W7 references agents by `agent_id` for documentation, but `TemplatedStrategyBackend` does the actual work without invoking the agents in the spawn sense.
+- **Resolves at:** with LLM-backed generators (P-3A.1).
+
+### P-3A.3 — Claim audit enforcement on the strategy report
+- **Introduced:** MKT-3A
+- **Why deferred:** Section 19 of the report flags `requires_compliance_audit: true` and lists unverified claims. The compliance gate (`claim_strict` mode, `g_compliance_passed`) is not wired into W7.
+- **Resolves at:** MKT-3B.
+
+### P-3A.4 — Approval Center halt-and-wait
+- **Introduced:** MKT-3A (carries P-1E.5).
+- **Status:** W7 declares `human_required_at: [approval]` but the dispatcher does not pause. The block ships the data shape; wiring the actual human gate is post-MKT-3B.
+- **Resolves at:** MKT-3B / dedicated Approval Center implementation block.
+
+### P-3A.5 — Versioned strategies per client
+- **Introduced:** MKT-3A
+- **Why deferred:** v1 uses singleton id `"current"` — a re-run overwrites the prior strategy. Versioning (history, comparison, rollback) is its own block.
+- **Resolves at:** when an operational case demands it.
+
+### P-3A.6 — Real image generation
+- **Introduced:** MKT-3A
+- **Why deferred:** `CreativeBriefPack` produces prompts; no image API is called. Image generation has its own cost / IP / hosting trade-offs.
+- **Resolves at:** post-MCP / post-Replicate integration block.
+
+### P-3A.7 — Parallel phase execution
+- **Introduced:** MKT-3A (carries P-2A.4 / P-2B.2).
+- **Why deferred:** Latency is fine for deterministic generation. Real LLM blocks land in seconds-to-minutes territory and would benefit from parallelism.
+- **Resolves at:** with LLM-backed backend.
+
+### P-3A.8 — `mkt strategy diff` / preview / publish CLI affordances
+- **Introduced:** MKT-3A
+- **Why deferred:** v1 ships `mkt run-strategy` and nothing else strategy-specific. Diff / preview / publish are useful but not blocking.
+- **Resolves at:** as operational need appears.
+
+### P-3A.9 — Direct integration with Approval Center entities
+- **Introduced:** MKT-3A
+- **Why deferred:** `ApprovalChecklist` is a section in the report, NOT the `approval` entity defined in `docs/approval-center.md`. The two should merge when the Approval Center implementation lands.
+- **Resolves at:** Approval Center implementation block.
