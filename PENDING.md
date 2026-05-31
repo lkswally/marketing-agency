@@ -564,3 +564,57 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-3D
 - **Why deferred:** Events are wrapped in `note` with `payload.visual_pack.action`. Same trade-off as MKT-3B/3C. Will batch with other promotions.
 - **Resolves at:** bundled with the next audit-trail bump.
+
+---
+
+## From MKT-3E (client brief intake pack)
+
+### P-3E.1 — Web form / landing page for intake
+- **Introduced:** MKT-3E
+- **Why deferred:** Explicitly out of scope by user direction. v1 ships CLI + JSON only.
+- **Resolves at:** dedicated landing / portal block.
+
+### P-3E.2 — LLM-assisted intake completion
+- **Introduced:** MKT-3E
+- **Why deferred:** The validator surfaces missing fields. An LLM-backed assistant could *suggest* values based on similar past intakes. Requires the safety boundaries from `docs/runtime/agent-backend-safety.md`.
+- **Resolves at:** post-Claude Code safety + explicit approval.
+
+### P-3E.3 — Interactive `mkt intake --wizard` CLI mode
+- **Introduced:** MKT-3E
+- **Why deferred:** CLI is one-shot (`--file`). A wizard would walk the user through prompts and emit the JSON.
+- **Resolves at:** as operational case demands.
+
+### P-3E.4 — Import adapters (Notion / Google Forms / Typeform)
+- **Introduced:** MKT-3E
+- **Why deferred:** v1 only reads local JSON. External-source adapters live in `integrations/` and follow the same R1-R4 phasing as the MCP roadmap.
+- **Resolves at:** per-source integration blocks.
+
+### P-3E.5 — Multi-language intake support
+- **Introduced:** MKT-3E
+- **Why deferred:** The demo mixes Spanish and English freely. Real multi-language UX would need locale-aware validator messages and templates.
+- **Resolves at:** continuation block when a non-Spanish client demands it.
+
+### P-3E.6 — Versioned intake history (diff between two intake files)
+- **Introduced:** MKT-3E
+- **Why deferred:** v1 uses singleton id `"current"`. Re-running overwrites.
+- **Resolves at:** when iterative editing of intakes becomes a real ops case.
+
+### P-3E.7 — Intake-side image attachments (logo, reference visuals)
+- **Introduced:** MKT-3E
+- **Why deferred:** Intake is text-only in v1. Logos and reference images would need attachment handling.
+- **Resolves at:** post-image-gen block.
+
+### P-3E.8 — `mkt intake diff` for comparing two intake files
+- **Introduced:** MKT-3E
+- **Why deferred:** Useful as an ops affordance, not blocking.
+- **Resolves at:** as needed.
+
+### P-3E.9 — Promote `intake` audit events to `audit-trail.v2`
+- **Introduced:** MKT-3E
+- **Why deferred:** Events are wrapped in `note` with `payload.intake.action`. Same trade-off as MKT-3B/3C/3D. Will batch.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-3E.10 — Auto-chain `intake → run-strategy --audit` as a single command
+- **Introduced:** MKT-3E
+- **Why deferred:** ADR 0013 D-13.7 explicitly chose NOT to auto-chain so warnings stay visible. An `--auto-run` flag is feasible but defaults must stay off.
+- **Resolves at:** when operational case demands it.

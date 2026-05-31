@@ -428,6 +428,122 @@ def _cmd_build_visuals(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_intake(args: argparse.Namespace, *, out) -> int:
+    """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
+
+    Disk side effects:
+    - persists the validated intake and validation result to memory.
+    - writes ``outputs/<slug>/intake.json``, ``outputs/<slug>/intake-summary.md``
+      and ``outputs/<slug>/brief.json`` (the latter is ready to feed
+      ``mkt run-strategy --brief``).
+
+    Exit codes:
+    - 0 on success (including with warnings).
+    - 2 when the input file is missing, unreadable or fails Pydantic validation.
+    - 4 when ``--strict`` is set and the validator returned critical issues.
+    """
+    from core.intake import (
+        INTAKE_KIND,
+        SINGLETON_ID,
+        VALIDATION_KIND,
+        ClientIntake,
+        IntakeNormalizationError,
+        IntakeValidator,
+        normalize_intake,
+        render_intake_summary,
+    )
+    from core.memory import JsonFileMemory
+
+    file_path = Path(args.file)
+    if not file_path.exists():
+        print(f"error: intake file not found: {file_path}", file=out)
+        return 2
+    try:
+        raw = json.loads(file_path.read_text(encoding="utf-8"))
+        intake = ClientIntake.model_validate(raw)
+    except Exception as e:  # noqa: BLE001 — surface schema errors as exit 2
+        print(f"error: invalid intake: {e}", file=out)
+        return 2
+
+    validation = IntakeValidator().validate(intake)
+    slug = validation.client_slug
+
+    memory = JsonFileMemory(Path(args.root))
+    memory.put(slug, INTAKE_KIND, SINGLETON_ID, intake.model_dump(mode="json"))
+    memory.put(slug, VALIDATION_KIND, SINGLETON_ID, validation.model_dump(mode="json"))
+
+    # Audit event.
+    from core.contracts import AuditEventType, AuditTrailEvent
+    from core.domain.base import utcnow as _utcnow
+
+    prev = memory.last_audit_hash(slug)
+    event = AuditTrailEvent.build(
+        event_type=AuditEventType.NOTE,
+        actor="intake_cli",
+        occurred_at=_utcnow(),
+        client_slug=slug,
+        payload={
+            "intake": {
+                "intake_id": validation.intake_id,
+                "client_slug": slug,
+                "is_valid": validation.is_valid,
+                "missing_critical": validation.missing_critical_count,
+                "missing_warning": validation.missing_warning_count,
+                "missing_info": validation.missing_info_count,
+                "action": "created",
+            }
+        },
+        prev_hash=prev,
+    )
+    memory.append_audit_event(event)
+
+    # Outputs (per-client subdirectory so multiple intakes coexist).
+    outputs_dir = Path(args.outputs_dir) / slug
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    intake_path = outputs_dir / "intake.json"
+    intake_path.write_text(intake.to_json(indent=2), encoding="utf-8")
+    md_path = outputs_dir / "intake-summary.md"
+    md_path.write_text(render_intake_summary(intake, validation), encoding="utf-8")
+
+    brief_path: Path | None = None
+    if validation.can_normalize:
+        try:
+            brief = normalize_intake(intake, validation)
+        except IntakeNormalizationError as e:
+            print(f"error: normalization failed: {e}", file=out)
+            return 2
+        brief_path = outputs_dir / "brief.json"
+        brief_path.write_text(brief.to_json(indent=2), encoding="utf-8")
+
+    if (
+        getattr(args, "strict", False)
+        and validation.missing_critical_count > 0
+    ):
+        print(
+            "error: --strict and critical issues present "
+            f"({validation.missing_critical_count})",
+            file=out,
+        )
+        # Still write the summary + intake so the reviewer can fix.
+        return 4
+
+    payload = {
+        "intake_id": validation.intake_id,
+        "client_slug": slug,
+        "is_valid": validation.is_valid,
+        "can_normalize": validation.can_normalize,
+        "missing_critical": validation.missing_critical_count,
+        "missing_warning": validation.missing_warning_count,
+        "missing_info": validation.missing_info_count,
+        "operational_defaults_applied": validation.operational_defaults_applied,
+        "intake_path": str(intake_path),
+        "summary_path": str(md_path),
+        "brief_path": str(brief_path) if brief_path else None,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 # -------- parser --------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -573,6 +689,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="fail with exit 3 when the Approval Pack blocks publish",
     )
     p_bv.set_defaults(func=_cmd_build_visuals)
+
+    # intake
+    p_in = subs.add_parser(
+        "intake",
+        help="validate and normalize a client intake JSON into a StrategyInputBrief",
+    )
+    p_in.add_argument("--file", required=True, help="path to the intake JSON file")
+    p_in.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_in.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where intake.json + intake-summary.md + brief.json are written (default: outputs/)",
+    )
+    p_in.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail with exit 4 when the validator returns critical issues",
+    )
+    p_in.set_defaults(func=_cmd_intake)
 
     return parser
 

@@ -1,0 +1,51 @@
+{
+  "schema_version": "client-intake.v1",
+  "client_name": "Acme Bootstrapped",
+  "industry": "marketing automation",
+  "market": "LATAM",
+  "product_or_service": "Acme Pro — suite de automatización de marketing para equipos chicos",
+  "product_type": "subscription",
+  "audience_description": "Fundadores de SaaS bootstrapped en LATAM, equipos de 1-5 personas, sin capital de riesgo",
+  "commercial_objective": "Generar 150 trials calificados por mes en LATAM en el próximo trimestre",
+  "brand_tone": ["claro", "directo", "irreverente"],
+  "preferred_words": ["equipos", "lanzar", "iterar", "fundador"],
+  "forbidden_words": ["disruptivo", "sinergia", "potenciar"],
+  "claim_style": "Específico, con fuente, sin superlativos vacíos.",
+  "possible_channels": ["newsletter", "blog", "linkedin", "x"],
+  "known_competitors": [
+    {
+      "name": "Big Marketing Suite",
+      "url": "https://big-suite.example",
+      "notes": "Caro, enterprise-only, setup lento."
+    },
+    {
+      "name": "Quick MKT",
+      "url": "https://quickmkt.example",
+      "notes": "Bueno en email pero débil en social."
+    }
+  ],
+  "budget_estimate": 3500,
+  "budget_currency": "USD",
+  "deadline": "2026-09-30",
+  "duration_weeks": 10,
+  "primary_kpi": "qualified_trials",
+  "locale": "es-AR",
+  "constraints": [
+    "No paid ads en el primer mes",
+    "Voz del fundador como narrador principal"
+  ],
+  "claims_to_avoid": [
+    "Garantizados",
+    "Sin riesgo",
+    "El mejor del mercado"
+  ],
+  "good_examples": [
+    "Newsletter de fundadores describiendo desafíos reales con métricas.",
+    "Posts de LinkedIn cortos con un solo punto y screenshot."
+  ],
+  "bad_examples": [
+    "Posts genéricos de motivación.",
+    "Stock photos de handshakes corporativos."
+  ],
+  "additional_context": "El cliente prefiere foco en Spanish LATAM y voz del fundador. Sin imágenes de stock."
+}
