@@ -544,6 +544,70 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
+    """Run the full campaign pipeline from an intake JSON.
+
+    Chains intake (MKT-3E) → strategy (MKT-3A) → approval (MKT-3B) →
+    creative (MKT-3C) → visual (MKT-3D) → final summary (MKT-3F).
+
+    Exit codes:
+    - 0 — pipeline succeeded (with or without warnings).
+    - 2 — intake file missing.
+    - 3 — ``--require-approval`` set AND the Approval Pack blocks publish.
+    - 4 — ``--strict`` set AND the intake has critical issues.
+    """
+    from core.memory import JsonFileMemory
+    from core.pipeline import (
+        PipelineBlockedByApproval,
+        PipelineOrchestrator,
+        PipelineStrictFailure,
+    )
+
+    intake_path = Path(args.intake)
+    if not intake_path.exists():
+        print(f"error: intake file not found: {intake_path}", file=out)
+        return 2
+
+    memory = JsonFileMemory(Path(args.root))
+    orchestrator = PipelineOrchestrator(
+        memory=memory, outputs_root=Path(args.outputs_dir)
+    )
+    try:
+        summary = orchestrator.run_from_file(
+            intake_path,
+            strict=getattr(args, "strict", False),
+            require_approval=getattr(args, "require_approval", False),
+            stop_on_blocked=getattr(args, "stop_on_blocked", False),
+        )
+    except PipelineStrictFailure as e:
+        print(f"error: {e}", file=out)
+        return 4
+    except PipelineBlockedByApproval as e:
+        print(f"error: {e}", file=out)
+        return 3
+
+    payload = {
+        "run_id": summary.run_id,
+        "client_slug": summary.client_slug,
+        "contract_version": summary.contract_version,
+        "overall_state": summary.overall_state.value,
+        "blocks_publish": summary.blocks_publish,
+        "is_complete": summary.is_complete,
+        "duration_seconds": round(summary.duration_seconds, 3),
+        "intake_critical": summary.intake_critical_count,
+        "intake_warning": summary.intake_warning_count,
+        "intake_info": summary.intake_info_count,
+        "report_id": summary.report_id,
+        "approval_pack_id": summary.approval_pack_id,
+        "creative_pack_id": summary.creative_pack_id,
+        "visual_pack_id": summary.visual_pack_id,
+        "stage_counts": summary.count_by_outcome(),
+        "outputs_dir": str(Path(args.outputs_dir) / summary.client_slug),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 # -------- parser --------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -712,6 +776,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="fail with exit 4 when the validator returns critical issues",
     )
     p_in.set_defaults(func=_cmd_intake)
+
+    # run-campaign
+    p_rc = subs.add_parser(
+        "run-campaign",
+        help="run the full campaign pipeline (intake → strategy → approval → creative → visual) in one command",
+    )
+    p_rc.add_argument("--intake", required=True, help="path to the intake JSON file")
+    p_rc.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_rc.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="root directory where per-client outputs are written (default: outputs/)",
+    )
+    p_rc.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail with exit 4 when the intake has critical issues",
+    )
+    p_rc.add_argument(
+        "--require-approval",
+        action="store_true",
+        help="fail with exit 3 when the Approval Pack blocks publish",
+    )
+    p_rc.add_argument(
+        "--stop-on-blocked",
+        action="store_true",
+        help="halt cleanly (exit 0) after approval when the pack blocks publish — skips creative + visual stages",
+    )
+    p_rc.set_defaults(func=_cmd_run_campaign)
 
     return parser
 

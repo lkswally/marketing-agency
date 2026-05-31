@@ -618,3 +618,50 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-3E
 - **Why deferred:** ADR 0013 D-13.7 explicitly chose NOT to auto-chain so warnings stay visible. An `--auto-run` flag is feasible but defaults must stay off.
 - **Resolves at:** when operational case demands it.
+
+---
+
+## From MKT-3F (campaign pipeline orchestrator)
+
+### P-3F.1 — Per-run archive of `campaign-final-summary.{md,json}`
+- **Introduced:** MKT-3F
+- **Why deferred:** Re-runs overwrite the latest summary. Historical runs are visible only via the audit trail. Adding `outputs/<slug>/runs/<run_id>/` would duplicate disk usage; postponed until an operator actually needs side-by-side diffing.
+- **Resolves at:** when an operations review requires comparing two runs.
+- **Sketch:** `--archive` flag → write a `runs/<run_id>/` snapshot in addition to the canonical `outputs/<slug>/` files.
+
+### P-3F.2 — Parallelize creative + visual after approval
+- **Introduced:** MKT-3F
+- **Why deferred:** Sequential is fine at current volumes (deterministic templates, sub-second per stage). The cut is natural (both depend on approval, neither on each other) but YAGNI.
+- **Resolves at:** when batch processing >50 campaigns/run becomes a real workload.
+- **Sketch:** wrap stages 4+5 in `concurrent.futures.ThreadPoolExecutor(max_workers=2)`; preserve ordering in `summary.stages`.
+
+### P-3F.3 — Pipeline run audit events as first-class `audit-trail.v2`
+- **Introduced:** MKT-3F
+- **Why deferred:** Events are wrapped in `note` with `payload.campaign_pipeline.{stage, action}`, same trade-off taken in MKT-3B/3C/3D/3E. Will batch with the next contract bump.
+- **Resolves at:** bundled with the next audit-trail revision.
+
+### P-3F.4 — `mkt campaign show <run_id>` to re-render a past run
+- **Introduced:** MKT-3F
+- **Why deferred:** Useful once P-3F.1 lands; without per-run archives there is nothing to re-render.
+- **Resolves at:** after P-3F.1.
+
+### P-3F.5 — Multi-tenant concurrency guard for the same `client_slug`
+- **Introduced:** MKT-3F
+- **Why deferred:** The orchestrator assumes single-writer per slug. Running two `mkt run-campaign` for the same slug concurrently is a user error; no lockfile yet.
+- **Resolves at:** if/when the system gets a daemon or queue mode.
+- **Sketch:** advisory file lock at `data/clients/<slug>/.lock` with PID + timestamp; refuse to run if held.
+
+### P-3F.6 — Stage retries with idempotency
+- **Introduced:** MKT-3F
+- **Why deferred:** Every stage is deterministic and runs in-process; retries are not needed today. Becomes relevant only once a stage calls a real external service (LLM, image gen, n8n).
+- **Resolves at:** at the same time the first external-call stage lands.
+
+### P-3F.7 — Surface intake warnings inline in `campaign-final-summary.md`
+- **Introduced:** MKT-3F
+- **Why deferred:** The summary lists counts (`critical/warning/info`) but not the actual messages. The full list lives in `intake-summary.md`. Adding it inline would balloon the summary; cross-link suffices for now.
+- **Resolves at:** when operator feedback says the cross-link is not enough.
+
+### P-3F.8 — `--archive-on-block` to keep blocked-run outputs separately
+- **Introduced:** MKT-3F
+- **Why deferred:** Blocked runs currently overwrite the canonical outputs with the SKIPPED state. An operator who wants to keep a blocked snapshot for diff against a later clean run would need a flag.
+- **Resolves at:** when P-3F.1 lands (this is a specialization).
