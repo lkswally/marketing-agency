@@ -781,3 +781,65 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-4B
 - **Why deferred:** `DEFAULT_ANTHROPIC_MODEL` is a module constant. Anthropic ships new Sonnet/Opus/Haiku versions periodically. A `models.toml` (or env-overridable registry) would centralise the version pin and make rollover a one-line change.
 - **Resolves at:** at the next model upgrade.
+
+---
+
+## From MKT-4C (real campaign quality pass)
+
+Detected by running the pipeline on a real intake (`examples/intake/marketing-agency-os.json`) and reading the generated outputs. Full evaluation: `docs/qa/mkt-4c-real-campaign-quality-pass.md`.
+
+### P-4C.1 — Templates ignore `brand_tone`
+- **Introduced:** MKT-4C
+- **Why deferred:** Out of scope for an evaluation block; the right fix is a tone-aware adjective/verb selector that maps `brand_tone` entries to lexical choices in `core/strategy/templates.py`. Bigger than a one-liner.
+- **Resolves at:** MKT-4D (template content quality pass).
+- **Sketch:** small `_tone_lexicon(brand_tone) -> dict[str, list[str]]` returning preferred adjectives, verbs and connectors per tone family. Inject into headline / big_idea / channel rationale templates.
+
+### P-4C.2 — Templates ignore `preferred_words`
+- **Introduced:** MKT-4C
+- **Why deferred:** Same as P-4C.1 — needs an injection point in headline, big_idea and at least one copy per channel.
+- **Resolves at:** MKT-4D.
+- **Sketch:** in `generate_value_proposition` + `generate_campaign_strategy` + `generate_social_post_drafts`, prefer at least 2 words from `brief.brand.lexicon_do` when synthesizing strings.
+
+### P-4C.3 — Placeholder phrase "X: Diseñado específicamente para Y" reused 6× (CRITICAL)
+- **Introduced:** MKT-4C
+- **Why deferred:** This is the single biggest source of perceived genericness in the output. Shows up as headline, big_idea, value prop, carrusel copy, social post body and reels voiceover. Each surface needs its own template; today they all derive from one `_format_value_prop_seed()` call.
+- **Resolves at:** MKT-4D.
+- **Sketch:** distinct seed phrases per surface, derived from different intake fields (industry-specific pain, audience-specific desired outcome, competitor differential).
+
+### P-4C.4 — Keyword cluster extractor produces junk clusters (`diseado`, `setup`, `sin`)
+- **Introduced:** MKT-4C
+- **Why deferred:** Cluster names come from word-splitting differentiators without a stopword filter and without Unicode normalization. `Sin contratos largos` → `sin_informational`. `Diseñado específicamente` → `diseado_informational` (also has the accent strip bug).
+- **Resolves at:** MKT-4D.
+- **Sketch:** in `generate_keyword_plan`, drop stopwords from a small ES list (`sin`, `con`, `para`, `por`, `de`, `el`, `la`, `los`, `las`, `un`, `una`, `que`, `y`, `o`, `a`, `en`), normalize Unicode via `unicodedata.normalize("NFD", ...)` then strip combining marks. Refuse clusters of <4 chars or single-word generic terms.
+
+### P-4C.5 — Hashtag generator strips accents incorrectly (`#Diseñado` → `#Diseado`)
+- **Introduced:** MKT-4C
+- **Why deferred:** Same root cause as P-4C.4 — naive ASCII strip instead of Unicode-aware normalization.
+- **Resolves at:** MKT-4D (bundled with P-4C.4).
+- **Sketch:** centralize the normalization in a `_slugify_for_hashtag(text)` helper; use NFD + strip Mn category + filter remaining non-alnum.
+
+### P-4C.6 — `RefusingClaudeInvoker.complete()` message is stale
+- **Introduced:** MKT-4C
+- **Why deferred:** Cosmetic. Says "MKT-4A ships infrastructure only — wire one in MKT-4B" but MKT-4B already shipped. Should now read "no ANTHROPIC_API_KEY set or `anthropic` SDK not installed".
+- **Resolves at:** any time; one-liner.
+
+### P-4C.7 — Templates ignore `good_examples` / `bad_examples`
+- **Introduced:** MKT-4C
+- **Why deferred:** Out of scope here. The intake captures concrete patterns the client wants/hates ("post LinkedIn con command real + screenshot + frase técnica" / "hilos motivacionales") and the generator never reads them.
+- **Resolves at:** MKT-4D.
+- **Sketch:** at least one social post copy per channel should be seeded with a `good_examples` pattern when one exists. The Approval Pack should flag generated copy that matches a `bad_examples` pattern.
+
+### P-4C.8 — Buyer persona quote and motivations are placeholders
+- **Introduced:** MKT-4C
+- **Why deferred:** Quote `"Necesito X sin tener que pensarlo demasiado."` and `Motivaciones: [único KPI repetido]` are template echos. Fixing this means actually thinking about pain → desire → quote chains per archetype.
+- **Resolves at:** MKT-4D or later.
+
+### P-4C.9 — Diagnostic section flags "Sin propuestas de valor declaradas" even when `additional_context` describes them
+- **Introduced:** MKT-4C
+- **Why deferred:** False positive caused by the diagnostic only checking `brief.product.value_props`. After MKT-4C, the normalizer DOES populate `value_props` for intakes with a clear em-dash separator, so this only triggers for prose-only intakes — but the diagnostic should also consider `additional_context`.
+- **Resolves at:** MKT-4D.
+
+### P-4C.10 — Channel rationale identical across all channels
+- **Introduced:** MKT-4C
+- **Why deferred:** `_rationale_for_channel(ch, audience)` returns the same template (`"Match con audiencia ({label}); rol esperado: {role}"`) for every channel. Channels have distinct dynamics (LinkedIn algorithm, X engagement, newsletter open rates) that the rationale should reflect.
+- **Resolves at:** MKT-4D.

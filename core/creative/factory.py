@@ -312,8 +312,16 @@ class CreativeFactory:
         # ---- reels ----
         reels: list[ReelsAsset] = []
         for src in report.reels_script_pack.scripts:
+            # Defensive: ReelsScriptEntry.title has no length cap upstream,
+            # but ReelsAsset.title is capped at 200 chars. Truncate so a
+            # long Claude- or template-generated title never crashes the
+            # creative stage. Discovered in MKT-4C with a real intake.
+            reel_title = (
+                src.title if len(src.title) <= 200
+                else src.title[:197].rstrip() + "..."
+            )
             reel = ReelsAsset(
-                title=src.title,
+                title=reel_title,
                 hook_variants=_hook_variants_for_reels(src.hook, audience_label),
                 beats=list(src.beats) or ["0-3s: hook", "3-25s: desarrollo", "25-30s: CTA"],
                 voiceover_lines=list(src.voiceover_lines),

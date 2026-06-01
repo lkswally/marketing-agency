@@ -1,0 +1,113 @@
+{
+  "schema_version": "client-intake.v1",
+  "client_name": "MARKETING-AGENCY-OS",
+  "industry": "developer tools for marketing teams",
+  "market": "LATAM + Spain + US Hispanic",
+  "product_or_service": "Pipeline determinístico, auditable y multi-tenant que genera estrategia, copies, emails, scripts de reels y dirección visual para campañas, con backend opcional de Claude y fallback seguro.",
+  "product_type": "other",
+  "audience_description": "Agencias chicas de marketing (3-15 personas), growth marketers in-house en startups B2B, freelancers estratégicos que manejan 5-20 cuentas en paralelo, e indie hackers que hacen su propio marketing. Todos comparten dos dolores: (a) tiempo perdido reescribiendo briefs y estrategias desde cero por cliente y (b) outputs de ChatGPT/Claude crudos que no pasan revisión interna sin reescritura.",
+  "commercial_objective": "Llevar el repo a 500 GitHub stars y 30 instalaciones reales de agencias en 12 semanas. Validar 10 paid pilots de 'soporte + customización' a USD 500/mes antes del fin de Q3.",
+  "brand_tone": [
+    "técnico-pragmático",
+    "anti-marketing-hueco",
+    "honesto sobre limitaciones",
+    "irreverente con buzzwords"
+  ],
+  "preferred_words": [
+    "determinístico",
+    "auditable",
+    "fallback",
+    "pipeline",
+    "intake",
+    "approval pack",
+    "claim audit",
+    "tenant",
+    "pin",
+    "trazabilidad"
+  ],
+  "forbidden_words": [
+    "disruptivo",
+    "revolucionario",
+    "transformación digital",
+    "experiencia inigualable",
+    "AI-powered",
+    "next-gen",
+    "potenciar",
+    "sinergia",
+    "soluciones de clase mundial"
+  ],
+  "claim_style": "Específico, con número o referencia al código. Nunca superlativos. Mostrar el comando exacto cuando sea posible. Si decimos que algo es seguro, mostramos el test que lo prueba.",
+  "possible_channels": [
+    "github_repo",
+    "newsletter",
+    "blog",
+    "linkedin",
+    "x",
+    "youtube_demos",
+    "hacker_news",
+    "indie_hackers"
+  ],
+  "known_competitors": [
+    {
+      "name": "ChatGPT + custom GPT para marketing",
+      "url": "https://chat.openai.com",
+      "notes": "Lo que usan hoy. Cero auditabilidad, cero trazabilidad, cero reproducibilidad, cero fallback. Calidad variable run a run."
+    },
+    {
+      "name": "Jasper",
+      "url": "https://jasper.ai",
+      "notes": "SaaS cerrado, USD 49-125/mes por usuario, sin control sobre el modelo, sin pipeline auditado, focus en single-shot copy."
+    },
+    {
+      "name": "Copy.ai",
+      "url": "https://copy.ai",
+      "notes": "Mismo modelo que Jasper. Genera copies sueltas sin coherencia entre piezas de una misma campaña."
+    },
+    {
+      "name": "Notion + plantillas manuales",
+      "url": "https://notion.so",
+      "notes": "Lo que usan agencias chicas. Reproducible pero 100% manual, no escala más de 3-4 clientes en paralelo."
+    },
+    {
+      "name": "n8n + LLM nodes custom",
+      "url": "https://n8n.io",
+      "notes": "Para los más técnicos. Funciona pero requiere ensamblar 15+ nodos, sin schema validation downstream, sin claim audit."
+    }
+  ],
+  "budget_estimate": 0,
+  "budget_currency": "USD",
+  "deadline": "2026-08-31",
+  "duration_weeks": 12,
+  "primary_kpi": "github_stars + paid_pilots_signed",
+  "locale": "es-AR",
+  "constraints": [
+    "Cero paid ads en los primeros 60 días — solo orgánico + comunidad.",
+    "Voz del founder (Lucas) como narrador principal.",
+    "Cada claim técnico debe linkear al test o ADR que lo respalda.",
+    "Nada de capturas de pantalla de UI hasta que exista una UI — solo terminal output real.",
+    "Sin imágenes generadas por IA mientras no haya un módulo de image-gen propio."
+  ],
+  "claims_to_avoid": [
+    "El mejor pipeline del mercado",
+    "Reemplazá a tu agencia",
+    "Resultados garantizados",
+    "Genera campañas perfectas",
+    "AI que entiende tu marca",
+    "10x tu marketing",
+    "Setup en segundos"
+  ],
+  "good_examples": [
+    "Post de LinkedIn con un command real (`mkt run-campaign --intake demo.json`) + screenshot del output Markdown + frase de cierre técnica.",
+    "Thread en X mostrando el audit-trail.v1 con hash chain y diciendo 'esto es por qué Claude alucinó y no te diste cuenta hasta el cliente'.",
+    "Newsletter de fundador contando bug real encontrado en MKT-4A, cómo se fixeó, y el test que ahora lo previene.",
+    "Issue de GitHub bien escrito + PR con tests verdes como contenido de marketing en sí mismo."
+  ],
+  "bad_examples": [
+    "Hilo motivacional sobre el futuro del marketing.",
+    "Carrusel de Instagram con tipografía colorida y citas de gurus.",
+    "Comparativa genérica 'AI vs human' sin números.",
+    "Posts de 'lecciones aprendidas construyendo X' sin link al commit.",
+    "Cualquier mención de 'mindset', 'unlock', 'leverage', 'game-changer'."
+  ],
+  "additional_context": "Producto open-source en estado beta funcional. 869 tests verdes, 16 ADRs documentados, pipeline determinístico end-to-end probado. Modelo de revenue dual: el core es gratis, el ingreso viene de (a) implementación + integración para agencias, (b) soporte + customización de templates, (c) eventual hosted version multi-tenant. La narrativa principal NO es 'AI hace marketing' — es 'ingeniería aplicada a producción de marketing, con Claude como acelerador opcional auditado'. Diferencial clave: somos la única opción que permite a una agencia mostrarle al cliente exactamente CÓMO se construyó cada pieza (hash chain del audit trail + invocation records). Posicionamiento: 'developer-grade marketing automation'."
+}

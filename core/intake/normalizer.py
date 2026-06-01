@@ -23,6 +23,38 @@ from core.strategy.models import (
 from .models import ClientIntake, IntakeValidationResult
 from .validator import DEFAULT_DURATION_WEEKS, DEFAULT_LOCALE, DEFAULT_PRIMARY_KPI
 
+_SHORT_NAME_MAX = 80
+_SHORT_NAME_SPLITTERS = (" — ", " - ", " – ", ":", "(", "|")
+
+
+def _short_product_name(prose: str) -> str:
+    """Derive a short product name from a longer ``product_or_service`` string.
+
+    Picks the prefix before the first separator (em-dash, colon, paren,
+    pipe), strips it, and caps at ``_SHORT_NAME_MAX`` chars. If the
+    result is empty or unhelpful, falls back to the full string capped.
+    Pure function. Never raises.
+
+    Examples
+    --------
+    >>> _short_product_name("Acme Pro — suite de automatización")
+    'Acme Pro'
+    >>> _short_product_name("Pipeline determinístico, auditable y multi-tenant que genera estrategia, copies, emails ...")
+    'Pipeline determinístico, auditable y multi-tenant que genera estrategia, copies, ...'  # truncated to 80
+    """
+    text = (prose or "").strip()
+    if not text:
+        return text
+    for sep in _SHORT_NAME_SPLITTERS:
+        idx = text.find(sep)
+        if 0 < idx <= _SHORT_NAME_MAX:
+            return text[:idx].strip()
+    if len(text) <= _SHORT_NAME_MAX:
+        return text
+    # Hard truncate at word boundary if possible.
+    cut = text[:_SHORT_NAME_MAX].rsplit(" ", 1)[0]
+    return (cut or text[:_SHORT_NAME_MAX]).rstrip(",;:.") + "..."
+
 
 class IntakeNormalizationError(RuntimeError):
     """Raised when a normalization is attempted on an intake that cannot be normalized."""
@@ -65,20 +97,58 @@ def normalize_intake(
     # ---- Product ----
     # ``product_or_service`` is required for normalization (validator pinned it).
     assert intake.product_or_service is not None  # pinned by validator
+    # MKT-4C: derive a SHORT product name (cap 80 chars, first phrase before
+    # an em-dash, colon or opening paren) so downstream titles like
+    # ``f"Hero campaña — {product.name}"`` stay within the asset title caps
+    # (200 chars on ReelsAsset / ImagePromptAsset). The full prose stays in
+    # ``description`` so prompts and visual concepts can still use it.
+    short_name = _short_product_name(intake.product_or_service)
+    # If the product_or_service had no natural separator (we ended up with
+    # a hard truncation ending in "..."), prefer the client_name as the
+    # human-facing label. Real-data observation from MKT-4C: long product
+    # descriptions without an em-dash produce garbage names like
+    # "Pipeline determinístico, auditable y multi-tenant que genera
+    # estrategia...". The client_name is invariably cleaner.
+    if short_name.endswith("...") and intake.client_name:
+        short_name = intake.client_name[:_SHORT_NAME_MAX]
+    # When we shortened the name (whether by splitter or by fallback to
+    # client_name), the prose AFTER the short name is an elevator-pitch /
+    # value-prop fragment. Surface it as an explicit value prop so the
+    # strategy templates AND the claim audit see it. Without this,
+    # downstream claim-detection misses risky words that the user wrote
+    # in product_or_service.
+    extracted_value_props: list[str] = []
+    if short_name != intake.product_or_service:
+        tail = intake.product_or_service[len(short_name):].lstrip(" —-–:|(")
+        if tail and tail not in short_name:
+            extracted_value_props.append(tail.strip())
+    long_description = (
+        intake.additional_context
+        if short_name == intake.product_or_service
+        else f"{intake.product_or_service}\n\n{intake.additional_context or ''}".strip()
+    )
     product = _InputProduct(
-        name=intake.product_or_service,
+        name=short_name,
         offer_type=intake.product_type or "product",
-        description=intake.additional_context,
-        value_props=[],
+        description=long_description or None,
+        value_props=extracted_value_props,
         price_amount=None,
         price_currency=None,
     )
 
     # ---- Audience hint ----
     assert intake.audience_description is not None  # pinned by validator
+    # MKT-4C: derive a SHORT audience label (same heuristic as the product
+    # name) so downstream titles + Visual.target_audience (cap 300) stay
+    # within bounds. Full prose stays in description. If truncation kicks
+    # in we still keep the ugly "..." string because there's no client_name
+    # equivalent for audience — but at least the cap is respected.
+    audience_label = _short_product_name(intake.audience_description or "") or (
+        intake.audience_description or ""
+    )
     audience_hint = _InputAudienceHint(
-        label=intake.audience_description,
-        description=intake.additional_context,
+        label=audience_label,
+        description=intake.audience_description,
         demographics={"geo": intake.market} if intake.market else {},
         psychographics={},
         preferred_channels=_normalize_channels(intake.possible_channels),

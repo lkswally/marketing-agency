@@ -722,7 +722,7 @@ def generate_reels_script_pack(
     scripts = [
         ReelsScriptEntry(
             script_id=new_id(),
-            title=f"Hook #1 — el problema de {audience.label}",
+            title=_truncate(f"Hook #1 — el problema de {audience.label}", 200),
             hook=_truncate(
                 f"Si sos {audience.label.lower()}, esto te va a sonar.", 200
             ),
