@@ -36,6 +36,7 @@ from .claude import (
     ClaudeOutputInvalid,
     ClaudeStrategyBackend,
 )
+from .invocation_log import ClaudeInvocationRecord
 from .invoker import (
     ClaudeInvocationContext,
     ClaudeInvoker,
@@ -44,17 +45,26 @@ from .invoker import (
     RefusingClaudeInvoker,
     ScriptedClaudeInvoker,
 )
+from .invokers import (
+    DEFAULT_ANTHROPIC_MODEL,
+    AnthropicSDKInvoker,
+    NoCredentialsError,
+)
 from .templated import TemplatedStrategyBackend
 
 __all__ = [
     "BACKEND_DEFAULT",
+    "DEFAULT_ANTHROPIC_MODEL",
+    "AnthropicSDKInvoker",
     "BackendFallbackEvent",
     "BackendKind",
     "ClaudeInvocationContext",
+    "ClaudeInvocationRecord",
     "ClaudeInvoker",
     "ClaudeInvokerError",
     "ClaudeOutputInvalid",
     "ClaudeStrategyBackend",
+    "NoCredentialsError",
     "NoRealInvokerError",
     "RefusingClaudeInvoker",
     "ScriptedClaudeInvoker",

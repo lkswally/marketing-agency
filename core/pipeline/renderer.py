@@ -69,10 +69,26 @@ def _render_backend(summary: CampaignRunSummary) -> str:
         for note in summary.backend_fallback_notes:
             lines.append(f"- ⚠️ {note}")
         lines.append(
-            "\n> Este pipeline NO usó Claude real para los métodos listados. "
-            "El backend Claude no está cableado a ningún invoker real todavía "
-            "(scope MKT-4B). Los outputs vinieron del backend `templated`."
+            "\n> Los métodos listados arriba cayeron al backend `templated`. "
+            "Causas posibles: SDK Anthropic no instalado, "
+            "`ANTHROPIC_API_KEY` ausente, error de API (auth/rate-limit/timeout/network), "
+            "output JSON inválido, o validación Pydantic fallida."
         )
+
+    # MKT-4B: per-call invocation table.
+    if summary.claude_invocations:
+        lines.append(f"\n**Invocaciones a Claude ({len(summary.claude_invocations)})**:")
+        lines.append("| Método | Modelo | Request ID | In | Out | Duración (ms) | OK |")
+        lines.append("|--------|--------|------------|----|----|---------------|-----|")
+        for r in summary.claude_invocations:
+            ok_emoji = "✅" if r.ok else "❌"
+            rid = (r.request_id or "—")[:24]
+            in_tok = r.input_tokens if r.input_tokens is not None else "—"
+            out_tok = r.output_tokens if r.output_tokens is not None else "—"
+            lines.append(
+                f"| `{r.method}` | `{r.model or '—'}` | `{rid}` | "
+                f"{in_tok} | {out_tok} | {r.duration_ms:.1f} | {ok_emoji} |"
+            )
 
     return "\n".join(lines)
 

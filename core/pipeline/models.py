@@ -18,6 +18,7 @@ from pydantic import Field, field_validator
 
 from core.creative.models import CreativeAssetState
 from core.domain.base import DomainModel, new_id, validate_slug
+from core.strategy.backends.invocation_log import ClaudeInvocationRecord
 
 PIPELINE_RUN_VERSION = "pipeline-run.v1"
 
@@ -116,6 +117,13 @@ class CampaignRunSummary(DomainModel):
     backend_fallback_notes: list[str] = Field(default_factory=list)
     """One short note per fallback. Format: ``"<method>: <reason>"``.
     Surfaced in ``campaign-final-summary.md`` and on stderr by the CLI."""
+
+    claude_invocations: list[ClaudeInvocationRecord] = Field(default_factory=list)
+    """One record per real Claude call attempt (MKT-4B). Empty when
+    using the templated backend; populated by
+    :class:`AnthropicSDKInvoker`. Each record carries model id,
+    request id, token counts, duration and an ``ok`` flag — never
+    the prompt body, the model output, or the API key."""
 
     @field_validator("client_slug")
     @classmethod

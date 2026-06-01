@@ -15,13 +15,17 @@ from .backend import (
 )
 from .backends import (
     BACKEND_DEFAULT,
+    DEFAULT_ANTHROPIC_MODEL,
+    AnthropicSDKInvoker,
     BackendFallbackEvent,
     BackendKind,
     ClaudeInvocationContext,
+    ClaudeInvocationRecord,
     ClaudeInvoker,
     ClaudeInvokerError,
     ClaudeOutputInvalid,
     ClaudeStrategyBackend,
+    NoCredentialsError,
     NoRealInvokerError,
     RefusingClaudeInvoker,
     ScriptedClaudeInvoker,
@@ -89,13 +93,18 @@ __all__ = [
     "BackendKind",
     "BackendFallbackEvent",
     "BACKEND_DEFAULT",
-    # Claude invoker (MKT-4A; real invoker = MKT-4B)
+    # Claude invoker (MKT-4A scaffolding)
     "ClaudeInvoker",
     "ClaudeInvocationContext",
     "ClaudeInvokerError",
     "NoRealInvokerError",
     "ScriptedClaudeInvoker",
     "RefusingClaudeInvoker",
+    # Real invoker (MKT-4B)
+    "AnthropicSDKInvoker",
+    "NoCredentialsError",
+    "DEFAULT_ANTHROPIC_MODEL",
+    "ClaudeInvocationRecord",
     "persist_input_brief",
     "load_input_brief_from_file",
     # Renderer

@@ -21,6 +21,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 
 class ClaudeInvokerError(RuntimeError):  # noqa: N818
@@ -56,6 +60,15 @@ class ClaudeInvocationContext:
 
     max_tokens: int = 2048
     temperature: float = 0.7
+
+    record_sink: list | None = None
+    """Optional list to receive a :class:`ClaudeInvocationRecord` for
+    each call. Real invokers (MKT-4B's :class:`AnthropicSDKInvoker`)
+    append exactly one record per call — both on success and on
+    failure (with ``ok=False``). The two MKT-4A invokers
+    (:class:`ScriptedClaudeInvoker`, :class:`RefusingClaudeInvoker`)
+    ignore this field. Backends that care about traceability create
+    a fresh empty list per call and drain it after."""
 
 
 class ClaudeInvoker(ABC):

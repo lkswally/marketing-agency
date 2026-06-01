@@ -725,3 +725,59 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-4A
 - **Why deferred:** `workflows/W7_campaign_strategy_engine.yaml` mentions `core.strategy.TemplatedStrategyBackend` in a comment. The class was renamed to `W7TemplatedAgentBackend` with an alias preserved for backward compat. Comment is stale but harmless.
 - **Resolves at:** next time the YAML is edited.
+
+---
+
+## From MKT-4B (anthropic sdk invoker)
+
+### P-4B.1 — Retry policy for transient errors
+- **Introduced:** MKT-4B
+- **Why deferred:** ADR 0016 D-16.4 explicitly chose one attempt per method. Adding retries needs a real policy (exponential vs linear, jitter, per-method budget, total run budget). No operational signal yet to choose.
+- **Resolves at:** when production runs surface `RateLimitError` recurrently.
+- **Sketch:** opt-in `retry: RetryPolicy | None = None` on `AnthropicSDKInvoker`. Cap at 3 attempts. Backoff with jitter. Record each attempt as a separate `ClaudeInvocationRecord` so the timeline stays auditable.
+
+### P-4B.2 — Streaming responses
+- **Introduced:** MKT-4B
+- **Why deferred:** The pipeline consumes the full string before parsing; streaming buys nothing on the strategy run path. Could matter for a future interactive CLI.
+- **Resolves at:** when an interactive `mkt chat` exists.
+
+### P-4B.3 — Per-tenant cost tracking + budget guard
+- **Introduced:** MKT-4B
+- **Why deferred:** `ClaudeInvocationRecord` already carries `input_tokens` / `output_tokens` per call; an aggregator + dashboard is a small project on top. Out of scope here.
+- **Resolves at:** when a multi-tenant deployment exists.
+- **Sketch:** `mkt costs --client <slug> [--since <date>]` walks the audit trail and aggregates tokens × $ per model. Budget guard: per-client monthly cap in `data/clients/<slug>/budget.json`; orchestrator refuses to wire SDK invoker once the cap is hit.
+
+### P-4B.4 — Multi-model cascade (Sonnet → Haiku → templated)
+- **Introduced:** MKT-4B
+- **Why deferred:** Today only one model is configured; cascade is YAGNI for the immediate use case but cheap to add once cost matters.
+- **Resolves at:** with P-4B.3.
+
+### P-4B.5 — Prompt caching via `cache_control`
+- **Introduced:** MKT-4B
+- **Why deferred:** Per-tenant prompts include the brief which changes per client; cache hit rate would be near zero. Once a stable system prompt + few-shot scaffold ships, prompt caching the static prefix saves money.
+- **Resolves at:** when system prompt + scaffold cross 1024 tokens of stable content.
+
+### P-4B.6 — Async invoker
+- **Introduced:** MKT-4B
+- **Why deferred:** The orchestrator is single-threaded and the 6 creative methods have data dependencies that mostly serialise them anyway. An async invoker would only help if parallelism is added at the orchestrator level (which is P-3F.2).
+- **Resolves at:** with P-3F.2.
+
+### P-4B.7 — Integration test suite against the real API
+- **Introduced:** MKT-4B
+- **Why deferred:** Tests are 100% mocked. A separate `pytest -m integration` job that runs against the real API with a low-budget sandbox key would catch SDK drift early.
+- **Resolves at:** when a sandbox API key is provisioned for CI.
+
+### P-4B.8 — Claude Code subprocess as a SECOND invoker
+- **Introduced:** MKT-4B
+- **Why deferred:** Rejected as the primary invoker (analysis in MKT-4B handoff: traceability + production fit). Could still be useful as a SECOND invoker for dev environments where the operator wants to use their Claude Pro/Max subscription instead of an API key.
+- **Resolves at:** if demand exists.
+
+### P-4B.9 — Surface invocation count in the JSON CLI summary
+- **Introduced:** MKT-4B
+- **Why deferred:** The CLI stdout JSON has `stage_counts`, `backend_fallback_count` and so on but does NOT expose `claude_invocations` directly (only via the on-disk `campaign-final-summary.json`). For CI consumers that just diff exit code + counts, adding `claude_invocation_count` and `claude_invocation_ok_count` to the CLI payload would be convenient.
+- **Resolves at:** when an external consumer asks for it.
+
+### P-4B.10 — Pin model id behind a single source of truth
+- **Introduced:** MKT-4B
+- **Why deferred:** `DEFAULT_ANTHROPIC_MODEL` is a module constant. Anthropic ships new Sonnet/Opus/Haiku versions periodically. A `models.toml` (or env-overridable registry) would centralise the version pin and make rollover a one-line change.
+- **Resolves at:** at the next model upgrade.

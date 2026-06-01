@@ -556,6 +556,8 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
     - 3 — ``--require-approval`` set AND the Approval Pack blocks publish.
     - 4 — ``--strict`` set AND the intake has critical issues.
     """
+    import os
+
     from core.memory import JsonFileMemory
     from core.pipeline import (
         PipelineBlockedByApproval,
@@ -563,7 +565,9 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
         PipelineStrictFailure,
     )
     from core.strategy import (
+        AnthropicSDKInvoker,
         ClaudeStrategyBackend,
+        NoCredentialsError,
         RefusingClaudeInvoker,
         StrategyBackend,
     )
@@ -574,13 +578,47 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
         return 2
 
     # Backend selection. ``templated`` (default) = no injection — orchestrator
-    # uses the deterministic path. ``claude`` = wire ClaudeStrategyBackend
-    # with the safe-by-default RefusingClaudeInvoker, which makes every call
-    # fall back to templated and surface that fact in audit + summary + stderr.
+    # uses the deterministic path. ``claude`` = wire ClaudeStrategyBackend.
+    # The invoker depends on whether ANTHROPIC_API_KEY is present AND whether
+    # the optional `anthropic` SDK is installed:
+    #   - key + SDK present → AnthropicSDKInvoker (real Claude calls, MKT-4B).
+    #   - key missing OR SDK missing → RefusingClaudeInvoker (MKT-4A behavior:
+    #     every call falls back to templated, surfaced in audit + summary +
+    #     stderr; pipeline still exits 0).
     backend_choice = getattr(args, "backend", "templated")
     strategy_backend: StrategyBackend | None = None
     if backend_choice == "claude":
-        strategy_backend = ClaudeStrategyBackend(invoker=RefusingClaudeInvoker())
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        claude_model = getattr(args, "claude_model", None) or os.environ.get(
+            "ANTHROPIC_MODEL"
+        )
+        if not api_key:
+            # Warnings always to sys.stderr so JSON parsers reading stdout
+            # never see them (tests and downstream consumers).
+            print(
+                "WARNING: --backend claude requested but ANTHROPIC_API_KEY is "
+                "not set. Wiring RefusingClaudeInvoker — every creative method "
+                "will fall back to the templated backend. Set the env var to "
+                "enable real Claude calls.",
+                file=sys.stderr,
+            )
+            strategy_backend = ClaudeStrategyBackend(invoker=RefusingClaudeInvoker())
+        else:
+            try:
+                invoker = AnthropicSDKInvoker(
+                    api_key=api_key, model=claude_model
+                )
+                strategy_backend = ClaudeStrategyBackend(invoker=invoker)
+            except NoCredentialsError as e:
+                # The `anthropic` SDK is not installed. Reason text is safe.
+                print(
+                    f"WARNING: --backend claude requested but the SDK is not "
+                    f"available: {e}. Falling back to templated.",
+                    file=sys.stderr,
+                )
+                strategy_backend = ClaudeStrategyBackend(
+                    invoker=RefusingClaudeInvoker()
+                )
 
     memory = JsonFileMemory(Path(args.root))
     orchestrator = PipelineOrchestrator(
@@ -848,10 +886,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default="templated",
         help=(
             "strategy content backend. 'templated' (default) = deterministic, "
-            "LLM-free. 'claude' = LLM-backed with automatic fallback to templated. "
-            "MKT-4A ships infrastructure only — no real Claude invoker is wired, "
-            "so 'claude' currently falls back to 'templated' on every call and "
-            "surfaces that explicitly in audit + summary + stderr."
+            "LLM-free. 'claude' = LLM-backed via Anthropic SDK, with automatic "
+            "fallback to templated on any error. Requires ANTHROPIC_API_KEY "
+            "and the optional `anthropic` package (`pip install -e .[claude]`)."
+        ),
+    )
+    p_rc.add_argument(
+        "--claude-model",
+        default=None,
+        help=(
+            "override the Claude model used by --backend claude. "
+            "Falls back to ANTHROPIC_MODEL env var, then to the package "
+            "default (claude-sonnet-4-5-...)."
         ),
     )
     p_rc.set_defaults(func=_cmd_run_campaign)

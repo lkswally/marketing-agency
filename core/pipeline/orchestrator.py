@@ -138,6 +138,7 @@ class PipelineOrchestrator:
             strategy_backend.kind if strategy_backend is not None else BackendKind.TEMPLATED
         )
         self._backend_fallback_events = []
+        self._backend_invocation_records = []
 
         # ----- Stage 1: intake -----
         intake_result, intake, validation, brief_path = self._stage_intake(strict=strict)
@@ -406,6 +407,30 @@ class PipelineOrchestrator:
 
         # Collect any backend fallback events for the audit + summary.
         self._backend_fallback_events.extend(result.fallback_events)
+
+        # Collect any invocation records (MKT-4B). Only present when a
+        # ClaudeStrategyBackend with a real invoker is wired.
+        sb = self._strategy_backend
+        if sb is not None and hasattr(sb, "drain_invocation_records"):
+            records = sb.drain_invocation_records()
+            self._backend_invocation_records.extend(records)
+            for rec in records:
+                self._emit_event(
+                    client_slug=client_slug,
+                    payload={
+                        "stage": StageId.STRATEGY.value,
+                        "action": "strategy_backend_invocation",
+                        "method": rec.method,
+                        "model": rec.model,
+                        "request_id": rec.request_id,
+                        "input_tokens": rec.input_tokens,
+                        "output_tokens": rec.output_tokens,
+                        "duration_ms": rec.duration_ms,
+                        "ok": rec.ok,
+                        "error_type": rec.error_type,
+                    },
+                )
+
         for fb in result.fallback_events:
             self._emit_event(
                 client_slug=client_slug,
@@ -652,6 +677,7 @@ class PipelineOrchestrator:
             backend_effective=backend_effective,
             backend_fallback_count=fb_count,
             backend_fallback_notes=fb_notes,
+            claude_invocations=list(self._backend_invocation_records),
         )
 
     def _compute_overall_state(self, approval_pack) -> CreativeAssetState:

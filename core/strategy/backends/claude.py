@@ -45,6 +45,7 @@ from .base import (
     BackendKind,
     StrategyBackend,
 )
+from .invocation_log import ClaudeInvocationRecord
 from .invoker import (
     ClaudeInvocationContext,
     ClaudeInvoker,
@@ -77,6 +78,7 @@ class ClaudeStrategyBackend(StrategyBackend):
         self._fallback = fallback or TemplatedStrategyBackend()
         self._client_slug = client_slug or "unknown"
         self._fallback_events: list[BackendFallbackEvent] = []
+        self._invocation_records: list[ClaudeInvocationRecord] = []
 
     # ---------- introspection ----------
 
@@ -84,6 +86,15 @@ class ClaudeStrategyBackend(StrategyBackend):
         events = list(self._fallback_events)
         self._fallback_events.clear()
         return events
+
+    def drain_invocation_records(self) -> list[ClaudeInvocationRecord]:
+        """Return and clear the per-call invocation records collected
+        from the invoker's ``record_sink``. The templated backend
+        never produces these; the SDK invoker produces one per call
+        (success or failure)."""
+        records = list(self._invocation_records)
+        self._invocation_records.clear()
+        return records
 
     def set_client_slug(self, slug: str) -> None:
         """Used by the W7 layer to propagate the tenant slug before a run."""
@@ -213,15 +224,24 @@ class ClaudeStrategyBackend(StrategyBackend):
             return fallback_call()
 
     def _call_invoker(self, method: str, prompt: str) -> str:
+        # Fresh sink per call. The invoker appends one record (success or
+        # failure). We drain unconditionally — the ``finally`` block makes
+        # sure the record is collected even when the invoker raises.
+        sink: list[ClaudeInvocationRecord] = []
         context = ClaudeInvocationContext(
             method=method,
             client_slug=self._client_slug,
+            record_sink=sink,
         )
-        raw = self._invoker.complete(
-            prompt,
-            system=prompts.SYSTEM_PROMPT,
-            context=context,
-        )
+        try:
+            raw = self._invoker.complete(
+                prompt,
+                system=prompts.SYSTEM_PROMPT,
+                context=context,
+            )
+        finally:
+            if sink:
+                self._invocation_records.extend(sink)
         if not isinstance(raw, str):
             raise ClaudeOutputInvalid(
                 f"invoker returned {type(raw).__name__}, expected str"

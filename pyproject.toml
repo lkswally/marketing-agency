@@ -24,6 +24,13 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
 ]
+# MKT-4B: optional Anthropic SDK for the `--backend claude` flag.
+# The templated backend works without this extra. If the SDK is not
+# installed AND the operator passes `--backend claude`, the pipeline
+# warns and falls back to templated cleanly.
+claude = [
+    "anthropic>=0.40,<1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
