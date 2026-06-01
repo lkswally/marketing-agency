@@ -9,9 +9,25 @@ from .backend import (
     REPORT_KIND,
     SINGLETON_ID,
     STRATEGY_WORKFLOW_ID,
-    TemplatedStrategyBackend,
+    W7TemplatedAgentBackend,
     load_input_brief_from_file,
     persist_input_brief,
+)
+from .backends import (
+    BACKEND_DEFAULT,
+    BackendFallbackEvent,
+    BackendKind,
+    ClaudeInvocationContext,
+    ClaudeInvoker,
+    ClaudeInvokerError,
+    ClaudeOutputInvalid,
+    ClaudeStrategyBackend,
+    NoRealInvokerError,
+    RefusingClaudeInvoker,
+    ScriptedClaudeInvoker,
+    StrategyBackend,
+    StrategyBackendError,
+    TemplatedStrategyBackend,
 )
 from .models import (
     CAMPAIGN_STRATEGY_VERSION,
@@ -62,8 +78,24 @@ __all__ = [
     "StrategyPipeline",
     "StrategyRunResult",
     "StrategyPipelineError",
-    # Backend
+    # W7 AgentBackend (workflow-level, internal)
+    "W7TemplatedAgentBackend",
+    # Strategy content backends (MKT-4A)
+    "StrategyBackend",
+    "StrategyBackendError",
     "TemplatedStrategyBackend",
+    "ClaudeStrategyBackend",
+    "ClaudeOutputInvalid",
+    "BackendKind",
+    "BackendFallbackEvent",
+    "BACKEND_DEFAULT",
+    # Claude invoker (MKT-4A; real invoker = MKT-4B)
+    "ClaudeInvoker",
+    "ClaudeInvocationContext",
+    "ClaudeInvokerError",
+    "NoRealInvokerError",
+    "ScriptedClaudeInvoker",
+    "RefusingClaudeInvoker",
     "persist_input_brief",
     "load_input_brief_from_file",
     # Renderer

@@ -3,6 +3,14 @@
 > Status: **policy** (MKT-2B). Applies the moment any non-mock backend is
 > implemented. Today only `MockAgentBackend` exists; `ClaudeCodeBackend` is
 > scaffolding that raises `NotImplementedError`.
+>
+> **Related (MKT-4A):** the `StrategyBackend` content layer in
+> `core/strategy/backends/` is a separate abstraction at the
+> content-generation level. It has its own safety boundaries
+> documented in [`strategy-backends.md`](strategy-backends.md).
+> The two layers do not overlap: this doc covers `AgentBackend` (full
+> workflow-step invocation), the other covers `StrategyBackend`
+> (single content artifact production).
 
 This document defines the **non-negotiable boundaries** that any real
 `AgentBackend` implementation MUST satisfy before being merged. It exists

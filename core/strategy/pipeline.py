@@ -25,10 +25,11 @@ from core.workflows import WorkflowSpec, load_workflow
 from .backend import (
     REPORT_KIND,
     SINGLETON_ID,
-    TemplatedStrategyBackend,
+    W7TemplatedAgentBackend,
     load_input_brief_from_file,
     persist_input_brief,
 )
+from .backends import BackendFallbackEvent, StrategyBackend
 from .models import CampaignStrategyReport, StrategyInputBrief
 from .renderer import render_markdown_report
 
@@ -42,6 +43,12 @@ class StrategyRunResult:
     summary: WorkflowRunSummary
     report: CampaignStrategyReport
     report_markdown_path: Path | None
+    fallback_events: tuple[BackendFallbackEvent, ...] = ()
+    """Fallback events recorded by the strategy backend during the run.
+    Always empty when using :class:`TemplatedStrategyBackend`. May be
+    non-empty (one entry per fallback) when using
+    :class:`ClaudeStrategyBackend` with an invoker that errors or
+    returns invalid output."""
 
 
 class StrategyPipeline:
@@ -52,9 +59,11 @@ class StrategyPipeline:
         memory: Memory,
         *,
         workflow_path: Path | None = None,
+        strategy_backend: StrategyBackend | None = None,
     ) -> None:
         self._memory = memory
         self._workflow_path = workflow_path or DEFAULT_WORKFLOW_PATH
+        self._strategy_backend = strategy_backend
 
     def _load_workflow(self) -> WorkflowSpec:
         return load_workflow(self._workflow_path)
@@ -80,7 +89,12 @@ class StrategyPipeline:
         persist_input_brief(self._memory, brief)
 
         spec = self._load_workflow()
-        backend = TemplatedStrategyBackend(self._memory)
+        # Optionally let the ClaudeStrategyBackend know which tenant it serves
+        # (the invoker may scope rate-limits per-tenant).
+        sb = self._strategy_backend
+        if sb is not None and hasattr(sb, "set_client_slug"):
+            sb.set_client_slug(client_slug)
+        backend = W7TemplatedAgentBackend(self._memory, strategy_backend=sb)
         dispatcher = MinimalDispatcher(memory=self._memory, agent_backend=backend)
         summary = dispatcher.run(spec, client_slug=client_slug)
 
@@ -101,10 +115,15 @@ class StrategyPipeline:
                 render_markdown_report(report), encoding="utf-8"
             )
 
+        fallback_events = ()
+        if sb is not None and hasattr(sb, "drain_fallback_events"):
+            fallback_events = tuple(sb.drain_fallback_events())
+
         return StrategyRunResult(
             summary=summary,
             report=report,
             report_markdown_path=markdown_path,
+            fallback_events=fallback_events,
         )
 
 

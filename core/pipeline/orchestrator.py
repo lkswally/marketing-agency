@@ -62,6 +62,8 @@ from core.intake import SINGLETON_ID as INTAKE_SINGLETON
 from core.memory import Memory
 from core.strategy import (
     REPORT_KIND,
+    BackendKind,
+    StrategyBackend,
     StrategyPipeline,
     StrategyPipelineError,
 )
@@ -110,6 +112,11 @@ class PipelineOrchestrator:
     def __init__(self, memory: Memory, *, outputs_root: Path) -> None:
         self._memory = memory
         self._outputs_root = outputs_root
+        # Set per-run by run() / run_from_file(). Reset every invocation
+        # so re-using the same orchestrator across runs is safe.
+        self._strategy_backend: StrategyBackend | None = None
+        self._backend_requested: BackendKind = BackendKind.TEMPLATED
+        self._backend_fallback_events: list = []
 
     # ---------- public API ----------
 
@@ -120,9 +127,17 @@ class PipelineOrchestrator:
         strict: bool = False,
         require_approval: bool = False,
         stop_on_blocked: bool = False,
+        strategy_backend: StrategyBackend | None = None,
     ) -> CampaignRunSummary:
         started_at = utcnow()
         stages: list[StageResult] = []
+
+        # Reset per-run backend bookkeeping.
+        self._strategy_backend = strategy_backend
+        self._backend_requested = (
+            strategy_backend.kind if strategy_backend is not None else BackendKind.TEMPLATED
+        )
+        self._backend_fallback_events = []
 
         # ----- Stage 1: intake -----
         intake_result, intake, validation, brief_path = self._stage_intake(strict=strict)
@@ -155,6 +170,7 @@ class PipelineOrchestrator:
                 "strict": strict,
                 "require_approval": require_approval,
                 "stop_on_blocked": stop_on_blocked,
+                "backend_requested": self._backend_requested.value,
             },
         )
 
@@ -367,7 +383,10 @@ class PipelineOrchestrator:
                 None,
             )
 
-        pipeline = StrategyPipeline(memory=self._memory)
+        pipeline = StrategyPipeline(
+            memory=self._memory,
+            strategy_backend=self._strategy_backend,
+        )
         outputs_dir = self._outputs_dir_for(client_slug)
         report_md_path = outputs_dir / "campaign-strategy.md"
 
@@ -385,12 +404,36 @@ class PipelineOrchestrator:
             )
             return stage, None
 
+        # Collect any backend fallback events for the audit + summary.
+        self._backend_fallback_events.extend(result.fallback_events)
+        for fb in result.fallback_events:
+            self._emit_event(
+                client_slug=client_slug,
+                payload={
+                    "stage": StageId.STRATEGY.value,
+                    "action": "strategy_backend_fallback",
+                    "method": fb.method,
+                    "requested_backend": fb.requested_backend.value,
+                    "fallback_backend": fb.fallback_backend.value,
+                    "reason": fb.reason,
+                },
+            )
+
+        notes = None
+        if result.fallback_events:
+            notes = (
+                f"strategy backend fallback x{len(result.fallback_events)}: "
+                + ", ".join(fb.method for fb in result.fallback_events)
+            )
+
         self._emit_event(
             client_slug=client_slug,
             payload={
                 "stage": StageId.STRATEGY.value,
                 "action": "succeeded",
                 "report_id": result.report.report_id,
+                "backend_requested": self._backend_requested.value,
+                "fallback_count": len(result.fallback_events),
             },
         )
         stage = StageResult(
@@ -400,6 +443,7 @@ class PipelineOrchestrator:
             finished_at=utcnow(),
             artifact_refs=[str(report_md_path)],
             memory_refs=[f"{REPORT_KIND}/{STRATEGY_SINGLETON}"],
+            notes=notes,
         )
         return stage, result.report
 
@@ -510,6 +554,7 @@ class PipelineOrchestrator:
         strict: bool = False,
         require_approval: bool = False,
         stop_on_blocked: bool = False,
+        strategy_backend: StrategyBackend | None = None,
     ) -> CampaignRunSummary:
         """Public entrypoint — caller supplies the intake path directly."""
         self._current_intake_path = intake_path
@@ -518,6 +563,7 @@ class PipelineOrchestrator:
             strict=strict,
             require_approval=require_approval,
             stop_on_blocked=stop_on_blocked,
+            strategy_backend=strategy_backend,
         )
 
     def _outputs_dir_for(self, client_slug: str) -> Path:
@@ -558,6 +604,22 @@ class PipelineOrchestrator:
         blocks_publish = (
             approval_pack.blocks_publish if approval_pack is not None else False
         )
+        # Backend bookkeeping.
+        backend_requested = self._backend_requested.value
+        fb_events = self._backend_fallback_events
+        fb_count = len(fb_events)
+        if self._strategy_backend is None or fb_count == 0:
+            # No backend injected, or no fallbacks: effective == requested.
+            backend_effective = backend_requested
+        else:
+            # We requested Claude; some calls fell back to templated.
+            # There are six "creative" methods total. All fell back → templated.
+            # Some fell back → mixed.
+            backend_effective = (
+                "templated" if fb_count >= 6 else "mixed"
+            )
+        fb_notes = [f"{fb.method}: {fb.reason}" for fb in fb_events]
+
         return CampaignRunSummary(
             contract_version=PIPELINE_RUN_VERSION,
             client_slug=client_slug,
@@ -586,6 +648,10 @@ class PipelineOrchestrator:
             intake_info_count=intake_validation.missing_info_count if intake_validation else 0,
             stages=list(stages),
             rule_set_id=DEFAULT_RULE_SET_ID,
+            backend_requested=backend_requested,
+            backend_effective=backend_effective,
+            backend_fallback_count=fb_count,
+            backend_fallback_notes=fb_notes,
         )
 
     def _compute_overall_state(self, approval_pack) -> CreativeAssetState:
@@ -628,6 +694,9 @@ class PipelineOrchestrator:
                 "overall_state": summary.overall_state.value,
                 "blocks_publish": summary.blocks_publish,
                 "stages_total": len(summary.stages),
+                "backend_requested": summary.backend_requested,
+                "backend_effective": summary.backend_effective,
+                "backend_fallback_count": summary.backend_fallback_count,
             },
         )
         return summary

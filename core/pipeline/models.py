@@ -98,6 +98,25 @@ class CampaignRunSummary(DomainModel):
     # Metadata
     rule_set_id: str | None = None
 
+    # Strategy backend bookkeeping (MKT-4A)
+    backend_requested: Literal["templated", "claude"] = "templated"
+    """The backend the operator asked for via ``--backend`` (or default)."""
+
+    backend_effective: Literal["templated", "claude", "mixed"] = "templated"
+    """What actually produced the content:
+    - ``"templated"``: every creative call came from the templated backend.
+    - ``"claude"``: every creative call came from Claude with no fallback.
+    - ``"mixed"``: some calls came from Claude, some fell back to templated.
+    """
+
+    backend_fallback_count: int = Field(default=0, ge=0)
+    """Number of creative methods that fell back. Always 0 for
+    ``backend_requested="templated"``. May be 1..6 for ``"claude"``."""
+
+    backend_fallback_notes: list[str] = Field(default_factory=list)
+    """One short note per fallback. Format: ``"<method>: <reason>"``.
+    Surfaced in ``campaign-final-summary.md`` and on stderr by the CLI."""
+
     @field_validator("client_slug")
     @classmethod
     def _slug(cls, v: str) -> str:

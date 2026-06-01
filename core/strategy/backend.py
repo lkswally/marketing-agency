@@ -1,4 +1,4 @@
-"""TemplatedStrategyBackend — campaign strategy engine backend.
+"""W7TemplatedAgentBackend — campaign strategy engine AgentBackend.
 
 When the dispatcher invokes an agent inside the W7 workflow, this backend
 runs the appropriate deterministic generator from :mod:`core.strategy.templates`,
@@ -8,6 +8,18 @@ persists the produced entity into Memory, and returns a valid
 For any other workflow, the backend transparently falls back to
 :class:`MockAgentBackend` so it is safe to wire as the default backend in
 any dispatcher.
+
+MKT-4A: the *creative* phases (positioning, creative, calendar — anything
+that benefits from richer wording) now route their content production
+through an injected :class:`core.strategy.backends.StrategyBackend`
+instance. The default is :class:`TemplatedStrategyBackend` (the new
+content-level class, byte-identical to MKT-3A behavior). Callers can
+pass :class:`ClaudeStrategyBackend` instead to opt into LLM-backed
+content with automatic fallback.
+
+Backward compatibility: the alias ``TemplatedStrategyBackend`` still
+resolves to this AgentBackend at module level, but new code SHOULD
+import :class:`W7TemplatedAgentBackend` explicitly.
 """
 
 from __future__ import annotations
@@ -81,12 +93,30 @@ REPORT_KIND = "campaign_strategy_report"
 SINGLETON_ID = "current"
 
 
-class TemplatedStrategyBackend(AgentBackend):
-    """Deterministic backend that drives the W7 campaign strategy workflow."""
+class W7TemplatedAgentBackend(AgentBackend):
+    """Deterministic AgentBackend that drives the W7 campaign strategy workflow.
 
-    def __init__(self, memory: Memory) -> None:
+    The "Templated" in the name reflects that the structural phases
+    (intake, diagnose, audience, competitor, channels, keywords,
+    calendar, approval) always use the templated generators. The
+    creative-content phases (positioning, creative) route through
+    the injected :class:`StrategyBackend` and therefore can be
+    Claude-backed when an operator passes ``--backend claude``.
+    """
+
+    def __init__(
+        self,
+        memory: Memory,
+        *,
+        strategy_backend=None,
+    ) -> None:
+        # Late import to avoid a cycle: backends/templated.py imports
+        # ``core.strategy.templates`` which is in the same package as us.
+        from .backends import TemplatedStrategyBackend
+
         self._memory = memory
         self._fallback = MockAgentBackend()
+        self._strategy: object = strategy_backend or TemplatedStrategyBackend()
 
     # ---------- AgentBackend ----------
 
@@ -171,7 +201,7 @@ class TemplatedStrategyBackend(AgentBackend):
             invocation.client_slug, TARGET_AUDIENCE_KIND, SINGLETON_ID
         )
         audience = TargetAudience.model_validate(audience_raw)
-        value_prop = templates.generate_value_proposition(brief, audience)
+        value_prop = self._strategy.value_proposition(brief, audience)
         self._put(
             invocation.client_slug, VALUE_PROPOSITION_KIND, SINGLETON_ID, value_prop
         )
@@ -219,16 +249,16 @@ class TemplatedStrategyBackend(AgentBackend):
             self._memory.get(invocation.client_slug, KEYWORD_PLAN_KIND, SINGLETON_ID)
         )
 
-        strategy = templates.generate_campaign_strategy(brief, value_prop)
+        strategy = self._strategy.campaign_strategy(brief, value_prop)
         pieces = templates.generate_suggested_pieces(brief, channels)
-        creative_pack = templates.generate_creative_brief_pack(
+        creative_pack = self._strategy.creative_brief_pack(
             brief, value_prop, audience
         )
-        social_drafts = templates.generate_social_post_drafts(
+        social_drafts = self._strategy.social_post_drafts(
             brief, value_prop, channels, keyword_plan
         )
-        email_seq = templates.generate_email_sequence(brief, value_prop, audience)
-        reels_pack = templates.generate_reels_script_pack(brief, value_prop, audience)
+        email_seq = self._strategy.email_sequence(brief, value_prop, audience)
+        reels_pack = self._strategy.reels_script_pack(brief, value_prop, audience)
 
         self._put(
             invocation.client_slug, CAMPAIGN_STRATEGY_KIND, SINGLETON_ID, strategy
@@ -396,3 +426,13 @@ def load_input_brief_from_file(path) -> StrategyInputBrief:
 
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     return StrategyInputBrief.model_validate(data)
+
+
+# ---------- Backward-compatible alias (MKT-4A) ----------
+#
+# The class was renamed from ``TemplatedStrategyBackend`` to
+# ``W7TemplatedAgentBackend`` so the user-facing name
+# ``TemplatedStrategyBackend`` can be claimed by the new content-level
+# class in ``core.strategy.backends``. External callers that still
+# import ``core.strategy.backend.TemplatedStrategyBackend`` keep working.
+TemplatedStrategyBackend = W7TemplatedAgentBackend

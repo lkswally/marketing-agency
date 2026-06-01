@@ -665,3 +665,63 @@ must say which block introduced it and which (estimated) block will resolve it.
 - **Introduced:** MKT-3F
 - **Why deferred:** Blocked runs currently overwrite the canonical outputs with the SKIPPED state. An operator who wants to keep a blocked snapshot for diff against a later clean run would need a flag.
 - **Resolves at:** when P-3F.1 lands (this is a specialization).
+
+---
+
+## From MKT-4A (controlled Claude strategy backend)
+
+### P-4A.1 — Real `ClaudeInvoker` implementation (MKT-4B)
+- **Introduced:** MKT-4A
+- **Why deferred:** MKT-4A explicitly ships **infrastructure only**. No real LLM invocation, no SDK, no subprocess, no network — by spec. The cleanest single-file extension point (`ClaudeInvoker.complete(...)`) is in place and the entire fallback / audit / summary plumbing is exercised by `RefusingClaudeInvoker` and `ScriptedClaudeInvoker`.
+- **Resolves at:** **MKT-4B**.
+- **Sketch:** add `core/strategy/backends/invokers/anthropic_sdk.py` with `AnthropicSDKInvoker(api_key=..., model=...)`. Wire env-var resolution and credential redaction. Keep the same `ClaudeInvoker` interface. No code changes elsewhere.
+
+### P-4A.2 — Per-method retry / backoff in the Claude backend
+- **Introduced:** MKT-4A
+- **Why deferred:** MKT-4A treats every invoker failure as a single-shot fallback. A real invoker will need retries (transient 5xx, rate-limit, timeout) before declaring failure.
+- **Resolves at:** MKT-4B alongside the real invoker.
+- **Sketch:** add `max_retries: int = 2` and exponential backoff to `_invoke_or_fallback`. Each retry attempt is NOT a fallback event; only the final failure counts.
+
+### P-4A.3 — Streaming / partial-output support
+- **Introduced:** MKT-4A
+- **Why deferred:** `ClaudeInvoker.complete(...)` returns a full string. Streaming would change the interface to yield chunks and would need a JSON-streaming parser. Out of scope.
+- **Resolves at:** when an actual UX requires it (e.g. a dashboard live view). Not before MKT-5.
+- **Sketch:** `ClaudeInvoker.stream(...) -> Iterator[str]` alternate method; the backend buffers and validates at the end.
+
+### P-4A.4 — Tool use / multi-turn conversations from the invoker
+- **Introduced:** MKT-4A
+- **Why deferred:** Single-shot prompts are sufficient for the six creative methods. Tool use opens an entirely new safety surface (the safety policy in `agent-backend-safety.md` would need to be extended).
+- **Resolves at:** post-MKT-5, with its own ADR and threat model.
+
+### P-4A.5 — Prompt versioning + per-tenant prompt overrides
+- **Introduced:** MKT-4A
+- **Why deferred:** Prompts live in `backends/prompts.py` as plain strings. A future block may want versioned, JSON-schema-driven prompts and a per-tenant override mechanism so a specific client gets a custom tone of voice.
+- **Resolves at:** when client-specific prompt tuning becomes a real ask.
+- **Sketch:** `prompts/v1/*.txt` directory + a `PromptLoader(tenant_overrides_root=...)`.
+
+### P-4A.6 — Cost / token tracking in the Claude backend
+- **Introduced:** MKT-4A
+- **Why deferred:** No real invoker → no real tokens. Adding counters in MKT-4A would be theatre.
+- **Resolves at:** MKT-4B with the real invoker.
+- **Sketch:** invoker returns `CompletionResult(text, input_tokens, output_tokens, model, cost_usd)` instead of `str`; the backend records aggregates per run in the summary.
+
+### P-4A.7 — Non-zero CLI exit on fallback (opt-in)
+- **Introduced:** MKT-4A
+- **Why deferred:** By explicit spec ("El pipeline puede terminar con exit 0 si el fallback completa correctamente"). Some operators (CI) might want a non-zero exit. Optional flag like `--fail-on-fallback` could be added.
+- **Resolves at:** if a real CI workflow needs it.
+- **Sketch:** add `--fail-on-fallback` to `run-campaign`; when set and `backend_fallback_count > 0`, exit with a new code (e.g. 5).
+
+### P-4A.8 — Promote `strategy_backend_fallback` to `audit-trail.v2`
+- **Introduced:** MKT-4A
+- **Why deferred:** Events are wrapped in the generic `note` event type with `payload.campaign_pipeline.action == "strategy_backend_fallback"`. Same trade-off taken in MKT-3B/3C/3D/3E/3F. Will batch with the next audit-trail bump.
+- **Resolves at:** bundled with the next `audit-trail` contract revision.
+
+### P-4A.9 — Hot-swap the fallback target
+- **Introduced:** MKT-4A
+- **Why deferred:** `ClaudeStrategyBackend` accepts a `fallback: StrategyBackend | None` constructor kwarg but in practice everyone uses the default (`TemplatedStrategyBackend`). A future block might want to chain backends (e.g. Claude → local-LLM → templated).
+- **Resolves at:** when a second non-templated backend exists.
+
+### P-4A.10 — Move workflows YAML comment off the legacy class name
+- **Introduced:** MKT-4A
+- **Why deferred:** `workflows/W7_campaign_strategy_engine.yaml` mentions `core.strategy.TemplatedStrategyBackend` in a comment. The class was renamed to `W7TemplatedAgentBackend` with an alias preserved for backward compat. Comment is stale but harmless.
+- **Resolves at:** next time the YAML is edited.

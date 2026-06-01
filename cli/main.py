@@ -562,11 +562,25 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
         PipelineOrchestrator,
         PipelineStrictFailure,
     )
+    from core.strategy import (
+        ClaudeStrategyBackend,
+        RefusingClaudeInvoker,
+        StrategyBackend,
+    )
 
     intake_path = Path(args.intake)
     if not intake_path.exists():
         print(f"error: intake file not found: {intake_path}", file=out)
         return 2
+
+    # Backend selection. ``templated`` (default) = no injection — orchestrator
+    # uses the deterministic path. ``claude`` = wire ClaudeStrategyBackend
+    # with the safe-by-default RefusingClaudeInvoker, which makes every call
+    # fall back to templated and surface that fact in audit + summary + stderr.
+    backend_choice = getattr(args, "backend", "templated")
+    strategy_backend: StrategyBackend | None = None
+    if backend_choice == "claude":
+        strategy_backend = ClaudeStrategyBackend(invoker=RefusingClaudeInvoker())
 
     memory = JsonFileMemory(Path(args.root))
     orchestrator = PipelineOrchestrator(
@@ -578,6 +592,7 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
             strict=getattr(args, "strict", False),
             require_approval=getattr(args, "require_approval", False),
             stop_on_blocked=getattr(args, "stop_on_blocked", False),
+            strategy_backend=strategy_backend,
         )
     except PipelineStrictFailure as e:
         print(f"error: {e}", file=out)
@@ -585,6 +600,21 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
     except PipelineBlockedByApproval as e:
         print(f"error: {e}", file=out)
         return 3
+
+    # Loudly surface fallbacks on stderr — the CLI exit is still 0 (the
+    # pipeline completed correctly with the templated fallback), but the
+    # operator must see that Claude real was NOT used. Stderr is always
+    # sys.stderr regardless of the test's ``out`` redirection so JSON
+    # parsers on stdout do not see the WARNING line.
+    if summary.backend_requested == "claude" and summary.backend_fallback_count > 0:
+        print(
+            f"WARNING: --backend claude requested but {summary.backend_fallback_count} "
+            f"of 6 creative method(s) fell back to templated. "
+            f"effective backend = '{summary.backend_effective}'. "
+            "No real Claude invoker is wired (MKT-4A ships infrastructure only; "
+            "wire one in MKT-4B). See campaign-final-summary.md for details.",
+            file=sys.stderr,
+        )
 
     payload = {
         "run_id": summary.run_id,
@@ -603,6 +633,10 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
         "visual_pack_id": summary.visual_pack_id,
         "stage_counts": summary.count_by_outcome(),
         "outputs_dir": str(Path(args.outputs_dir) / summary.client_slug),
+        "backend_requested": summary.backend_requested,
+        "backend_effective": summary.backend_effective,
+        "backend_fallback_count": summary.backend_fallback_count,
+        "backend_fallback_notes": list(summary.backend_fallback_notes),
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
     return 0
@@ -807,6 +841,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stop-on-blocked",
         action="store_true",
         help="halt cleanly (exit 0) after approval when the pack blocks publish — skips creative + visual stages",
+    )
+    p_rc.add_argument(
+        "--backend",
+        choices=("templated", "claude"),
+        default="templated",
+        help=(
+            "strategy content backend. 'templated' (default) = deterministic, "
+            "LLM-free. 'claude' = LLM-backed with automatic fallback to templated. "
+            "MKT-4A ships infrastructure only — no real Claude invoker is wired, "
+            "so 'claude' currently falls back to 'templated' on every call and "
+            "surfaces that explicitly in audit + summary + stderr."
+        ),
     )
     p_rc.set_defaults(func=_cmd_run_campaign)
 

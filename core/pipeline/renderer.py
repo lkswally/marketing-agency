@@ -26,11 +26,55 @@ def render_markdown_summary(summary: CampaignRunSummary) -> str:
     parts: list[str] = []
     parts.append(_render_header(summary))
     parts.append(_render_summary(summary))
+    parts.append(_render_backend(summary))
     parts.append(_render_stages(summary))
     parts.append(_render_artifacts(summary))
     parts.append(_render_next_steps(summary))
     parts.append(_render_footer(summary))
     return "\n\n".join(parts) + "\n"
+
+
+def _render_backend(summary: CampaignRunSummary) -> str:
+    """Backend bookkeeping section. Always present; surfaces fallbacks loudly."""
+    lines = [_section_h2("01b", "Strategy backend")]
+    requested = summary.backend_requested
+    effective = summary.backend_effective
+    fb_count = summary.backend_fallback_count
+
+    requested_emoji = "📋" if requested == "templated" else "🤖"
+    if requested == "templated":
+        lines.append(f"- **Backend solicitado**: {requested_emoji} `templated` (default).")
+    else:
+        lines.append(f"- **Backend solicitado**: {requested_emoji} `claude`.")
+
+    if requested == "claude":
+        if effective == "claude":
+            lines.append("- **Backend efectivo**: 🤖 `claude` (sin fallback).")
+        elif effective == "mixed":
+            lines.append(
+                f"- ⚠️ **Backend efectivo**: `mixed` — {fb_count} de 6 llamadas "
+                "creativas cayeron al backend `templated`."
+            )
+        else:  # templated
+            lines.append(
+                "- 🛑 **Backend efectivo**: `templated` — **NINGUNA** llamada "
+                "creativa fue resuelta por Claude real. "
+                "Toda la salida vino del backend determinístico (fallback)."
+            )
+    else:
+        lines.append("- **Backend efectivo**: 📋 `templated`.")
+
+    if fb_count > 0:
+        lines.append(f"\n**Fallbacks registrados ({fb_count})**:")
+        for note in summary.backend_fallback_notes:
+            lines.append(f"- ⚠️ {note}")
+        lines.append(
+            "\n> Este pipeline NO usó Claude real para los métodos listados. "
+            "El backend Claude no está cableado a ningún invoker real todavía "
+            "(scope MKT-4B). Los outputs vinieron del backend `templated`."
+        )
+
+    return "\n".join(lines)
 
 
 # ---------- helpers ----------
