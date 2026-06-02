@@ -615,6 +615,152 @@ def _cmd_notion_plan(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_notion_sync(args: argparse.Namespace, *, out) -> int:
+    """Execute the Notion sync (MKT-5B). Dry-run by default; only writes
+    when ``--write --confirm`` is BOTH set AND the env vars / SDK are
+    available AND the plan has no ERROR-severity issues.
+
+    Exit codes:
+    - 0 on success (dry-run or real write)
+    - 2 when there is no NotionSyncPlan / task pack for the client
+    - 3 when ``--write`` is set without ``--confirm`` (safety gate)
+    """
+    import os
+
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.notion_sync import (
+        NoNotionCredentialsError,
+        NotionClientWriter,
+        NotionSyncExecutor,
+        RefusingNotionWriter,
+        SyncMode,
+        render_markdown_report,
+    )
+
+    # ---- Safety gate ----
+    write_requested = getattr(args, "write", False)
+    confirmed = getattr(args, "confirm", False)
+    dry_run = getattr(args, "dry_run", False) or not write_requested
+
+    if write_requested and not confirmed:
+        print(
+            "error: --write requires --confirm. Refusing to call Notion without "
+            "explicit confirmation.",
+            file=out,
+        )
+        return 3
+
+    # ---- Memory + verify upstream artifacts ----
+    memory = JsonFileMemory(Path(args.root))
+    from core.notion_sync import NOTION_SYNC_PLAN_KIND
+    from core.notion_sync import SINGLETON_ID as PLAN_SINGLETON
+
+    try:
+        memory.get(args.client, NOTION_SYNC_PLAN_KIND, PLAN_SINGLETON)
+    except EntityNotFound:
+        print(
+            f"error: no NotionSyncPlan for client {args.client!r}; run "
+            "`mkt notion-plan` first.",
+            file=out,
+        )
+        return 2
+
+    # ---- Resolve credentials + writer ----
+    token = os.environ.get("NOTION_TOKEN")
+    database_id = os.environ.get("NOTION_TASKS_DATABASE_ID") or getattr(
+        args, "database_id", None
+    )
+    token_env_present = bool(token)
+    database_id_env_present = bool(os.environ.get("NOTION_TASKS_DATABASE_ID"))
+
+    # Lazy-check the SDK availability without importing it.
+    import importlib.util
+    sdk_available = importlib.util.find_spec("notion_client") is not None
+
+    writer = RefusingNotionWriter()
+    write_blocked_reason: str | None = None
+    if dry_run:
+        write_blocked_reason = "Modo dry-run (default). No se intentó escribir."
+    elif not token:
+        write_blocked_reason = (
+            "NOTION_TOKEN no está seteado; el sync se ejecuta como dry-run."
+        )
+        print(
+            "WARNING: --write --confirm requested but NOTION_TOKEN is not set. "
+            "Falling back to dry-run.",
+            file=sys.stderr,
+        )
+    elif not database_id:
+        write_blocked_reason = (
+            "NOTION_TASKS_DATABASE_ID no está seteado; el sync se "
+            "ejecuta como dry-run."
+        )
+        print(
+            "WARNING: --write --confirm requested but NOTION_TASKS_DATABASE_ID "
+            "is not set. Falling back to dry-run.",
+            file=sys.stderr,
+        )
+    else:
+        # Token + DB id present. Try to instantiate the real writer.
+        try:
+            writer = NotionClientWriter(token=token, database_id=database_id)
+        except NoNotionCredentialsError as e:
+            write_blocked_reason = f"{e}"
+            print(
+                f"WARNING: cannot construct NotionClientWriter: {e}. Falling "
+                "back to dry-run.",
+                file=sys.stderr,
+            )
+
+    # ---- Run executor ----
+    executor = NotionSyncExecutor(
+        memory=memory, writer=writer, database_id=database_id
+    )
+    mode = SyncMode.WRITE if write_requested else SyncMode.DRY_RUN
+    report = executor.run(
+        args.client,
+        mode=mode,
+        confirmed=confirmed,
+        token_env_present=token_env_present,
+        database_id_env_present=database_id_env_present,
+        sdk_available=sdk_available,
+        write_blocked_reason=write_blocked_reason,
+    )
+    executor.persist_report(report)
+
+    # ---- Write outputs ----
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "notion-sync-report.md"
+    md_path.write_text(render_markdown_report(report), encoding="utf-8")
+    json_path = outputs_dir / "notion-sync-report.json"
+    json_path.write_text(report.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "report_id": report.report_id,
+        "client_slug": report.client_slug,
+        "plan_id": report.plan_id,
+        "task_pack_id": report.task_pack_id,
+        "mode": report.mode.value,
+        "confirmed": report.confirmed,
+        "write_attempted": report.write_attempted,
+        "write_blocked_reason": report.write_blocked_reason,
+        "stats": {
+            "total_records": report.stats.total_records,
+            "created": report.stats.created,
+            "skipped_blocked": report.stats.skipped_blocked,
+            "skipped_invalid": report.stats.skipped_invalid,
+            "skipped_already_synced": report.stats.skipped_already_synced,
+            "skipped_refused": report.stats.skipped_refused,
+            "failed": report.stats.failed,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1054,6 +1200,57 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where notion-sync-plan.{md,json} are written (default: outputs/)",
     )
     p_np.set_defaults(func=_cmd_notion_plan)
+
+    # notion-sync (MKT-5B)
+    p_ns = subs.add_parser(
+        "notion-sync",
+        help=(
+            "execute the Notion sync. DRY-RUN by default; requires "
+            "BOTH --write and --confirm to actually call Notion. Even "
+            "then, missing NOTION_TOKEN / NOTION_TASKS_DATABASE_ID falls "
+            "back to dry-run with a clear warning."
+        ),
+    )
+    p_ns.add_argument("--client", required=True, help="client slug")
+    p_ns.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_ns.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where notion-sync-report.{md,json} are written",
+    )
+    p_ns.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "explicit dry-run flag (also the default when --write is absent)"
+        ),
+    )
+    p_ns.add_argument(
+        "--write",
+        action="store_true",
+        help=(
+            "request real Notion writes. Requires --confirm; without it "
+            "the CLI exits with code 3 and writes nothing."
+        ),
+    )
+    p_ns.add_argument(
+        "--confirm",
+        action="store_true",
+        help="explicit confirmation gate for --write",
+    )
+    p_ns.add_argument(
+        "--database-id",
+        default=None,
+        help=(
+            "override NOTION_TASKS_DATABASE_ID. Ignored unless --write "
+            "--confirm is also set."
+        ),
+    )
+    p_ns.set_defaults(func=_cmd_notion_sync)
 
     # intake
     p_in = subs.add_parser(

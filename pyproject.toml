@@ -31,6 +31,13 @@ dev = [
 claude = [
     "anthropic>=0.40,<1.0",
 ]
+# MKT-5B: optional Notion SDK for `mkt notion-sync --write --confirm`.
+# The dry-run path works without this extra. If the SDK is not installed
+# AND the operator passes --write --confirm, the executor falls back to
+# dry-run with a clear warning.
+notion = [
+    "notion-client>=2.0,<3.0",
+]
 
 [build-system]
 requires = ["hatchling"]

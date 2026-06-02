@@ -976,3 +976,62 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-5A
 - **Why deferred:** The sync today is conceptually create-only. Re-syncing the same task (after a status change in MARKETING-AGENCY-OS) should UPDATE the Notion page, not create a duplicate. Needs a stable task_id ↔ page_id mapping.
 - **Resolves at:** with P-5A.2.
+
+---
+
+## MKT-5A items resolved in MKT-5B
+
+- **P-5A.2** (real Notion sync block, write path) — **✅ resolved**. `NotionSyncExecutor` + `NotionClientWriter` ship the write path behind `--write --confirm` + env vars + SDK availability. `RefusingNotionWriter` keeps the dry-run fallback uniform.
+- **P-5A.7** (task_id ↔ page_id mapping for idempotency) — **✅ resolved** via `NotionSyncedPagesIndex` persisted at `<client>/notion_synced_pages/current.json`. Re-runs skip already-synced tasks; the writer is never called twice for the same task.
+
+---
+
+## From MKT-5B (notion sync writer)
+
+### P-5B.1 — Retry policy for transient errors
+- **Introduced:** MKT-5B
+- **Why deferred:** ADR 0019 D-19.6 explicitly chose one attempt per task. Notion's `RateLimitError` is the most likely transient error; a backoff + 2-3 retries with jitter would recover most of them without burning quota.
+- **Resolves at:** when production runs surface `RateLimitError` recurrently.
+- **Sketch:** opt-in `retry: RetryPolicy | None = None` kwarg on `NotionClientWriter`. Each retry is a separate `NotionWriteAttempt` in the sink so the audit timeline stays granular.
+
+### P-5B.2 — Batch / streaming endpoints
+- **Introduced:** MKT-5B
+- **Why deferred:** Notion API supports a `pages.create` per call; no batch endpoint exists. Bulk writes today are just N serial calls. Could be parallelised via `asyncio` with a small worker pool.
+- **Resolves at:** if/when a campaign produces hundreds of tasks and sync latency matters.
+
+### P-5B.3 — `update_page` for the subset of fields that change upstream
+- **Introduced:** MKT-5B
+- **Why deferred:** Today the writer is create-only and the executor refuses to touch already-synced pages. State changes inside MAOS (e.g. a task moving from `todo` to `done`) do NOT propagate to Notion. Adding `update_page` needs an explicit idempotency design (which fields are MAOS-owned vs operator-edited).
+- **Resolves at:** when the operator declares a "MAOS-owned fields" contract.
+- **Sketch:** add `update_page(page_id, properties)` to `NotionWriter`. Executor compares the task's current state against the last synced state; only sends a diff for MAOS-owned fields (Status, Due Date, Blocked Reason). Operator-edited fields (Description, Owner Hint) are never overwritten.
+
+### P-5B.4 — Per-tenant `database_id` mapping
+- **Introduced:** MKT-5B
+- **Why deferred:** Today the env var `NOTION_TASKS_DATABASE_ID` is global. A multi-tenant deployment needs per-client database ids (different agencies → different workspaces).
+- **Resolves at:** when multi-tenant deployment is real.
+- **Sketch:** `data/clients/<slug>/notion.json` carries `database_id`, optional `parent_page_id`, optional `icon` override. The CLI reads it instead of the env var when present.
+
+### P-5B.5 — Promote `Depends On` to a Notion relation property
+- **Introduced:** MKT-5B
+- **Why deferred:** Depends on `P-5A.1` (the planner change to emit relations). The writer would need a two-pass create: pages first, then patch each page with the relation. Today it's a rich_text string.
+- **Resolves at:** after P-5A.1 lands.
+
+### P-5B.6 — Cost / rate-limit dashboard
+- **Introduced:** MKT-5B
+- **Why deferred:** The audit trail already carries per-attempt records (mode, duration, ok, error_type, page_id). An aggregator could count attempts per run per client per day.
+- **Resolves at:** when an operations review needs it.
+
+### P-5B.7 — Real integration smoke test against a sandbox Notion workspace
+- **Introduced:** MKT-5B
+- **Why deferred:** All tests today are mocked. A `@pytest.mark.integration` job that runs against a real (sandbox) Notion workspace would catch SDK drift early.
+- **Resolves at:** when a sandbox workspace + token are provisioned for CI.
+
+### P-5B.8 — `mkt notion-sync --reset-index <task_id>` helper
+- **Introduced:** MKT-5B
+- **Why deferred:** To force a re-sync today the operator manually edits `notion_synced_pages/current.json`. A small CLI helper would be friendlier (clear by task_id, clear all, clear if Notion page does not exist).
+- **Resolves at:** when an operator asks for it.
+
+### P-5B.9 — Promote audit payload to `audit-trail.v2`
+- **Introduced:** MKT-5B
+- **Why deferred:** Events are wrapped in `note` with `payload.notion_sync.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
