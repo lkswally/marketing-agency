@@ -936,3 +936,43 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-4E
 - **Why deferred:** Social publishing task description says "Cargar la pieza en la herramienta de publicación del canal". The actual tool (Buffer, Hootsuite, Later, native) is undetermined. Could be a per-tenant config.
 - **Resolves at:** when a tenant has a fixed tool stack.
+
+---
+
+## From MKT-5A (notion sync dry-run plan)
+
+### P-5A.1 — Promote `depends_on` to a Notion relation property
+- **Introduced:** MKT-5A
+- **Why deferred:** The dry-run plan maps `depends_on` to a `rich_text` joined string. A real sync would prefer a `relation` property pointing at the same database. Needs a two-pass create (pages first, relations second) which the planner can model later.
+- **Resolves at:** P-5A.2 (real sync block) or earlier if useful.
+
+### P-5A.2 — Real Notion sync block (write path)
+- **Introduced:** MKT-5A
+- **Why deferred:** Out of scope here. The block ships infrastructure only — the real sync block would consume the plan + call Notion via the official SDK behind an opt-in `--push-to-notion` flag, using the same env-var + extras pattern as `--backend claude` (MKT-4B).
+- **Resolves at:** future block; explicitly out of scope here.
+- **Sketch:** new `core/notion_sync/sync.py` with `NotionSyncExecutor(client_factory=...)`. CLI flag `--push-to-notion`. Env vars `NOTION_TOKEN` + `NOTION_PARENT_PAGE_ID`. Tests with mocked SDK only; CI never hits Notion.
+
+### P-5A.3 — Pin Channel select options from the strategy report
+- **Introduced:** MKT-5A
+- **Why deferred:** Channel options are open today; the sync would add options on first occurrence. Could be pinned by introspecting every channel in the report's `channel_recommendation` and the `suggested_pieces`.
+- **Resolves at:** with P-5A.2 (worth doing before the first real sync).
+
+### P-5A.4 — Split Notes into two rich_text blocks
+- **Introduced:** MKT-5A
+- **Why deferred:** `Notes` concatenates `description + notes` blindly. Notion caps rich_text at 2000 chars per BLOCK; we could legitimately use multiple blocks for description and notes separately.
+- **Resolves at:** if real tasks exceed the cap in practice.
+
+### P-5A.5 — Date-range view recommendation
+- **Introduced:** MKT-5A
+- **Why deferred:** The recommended database does not specify default views (board, table, timeline). A real sync could create them at database setup time.
+- **Resolves at:** with P-5A.2.
+
+### P-5A.6 — Per-tenant Notion workspace mapping
+- **Introduced:** MKT-5A
+- **Why deferred:** A multi-tenant setup needs per-client mapping: which Notion workspace, which parent page, which icon, which database_id when re-syncing. Could live in a `data/clients/<slug>/notion.json` config.
+- **Resolves at:** when multi-tenant deployment is real.
+
+### P-5A.7 — Real "task_blocked" handling on update path
+- **Introduced:** MKT-5A
+- **Why deferred:** The sync today is conceptually create-only. Re-syncing the same task (after a status change in MARKETING-AGENCY-OS) should UPDATE the Notion page, not create a duplicate. Needs a stable task_id ↔ page_id mapping.
+- **Resolves at:** with P-5A.2.

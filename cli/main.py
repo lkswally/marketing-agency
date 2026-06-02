@@ -547,6 +547,74 @@ def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_notion_plan(args: argparse.Namespace, *, out) -> int:
+    """Build the Notion sync dry-run plan (MKT-5A) from a persisted
+    :class:`CampaignExecutionTaskPack` (MKT-4E).
+
+    DRY RUN ONLY. No Notion API call. No credential. No write.
+
+    Exit codes:
+    - 0 on success
+    - 2 when no task pack exists for ``--client``
+    """
+    from core.execution import (
+        EXECUTION_TASK_PACK_KIND,
+        CampaignExecutionTaskPack,
+    )
+    from core.execution import SINGLETON_ID as TASK_PACK_SINGLETON
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.notion_sync import NotionSyncPlanner, render_markdown_plan
+
+    memory = JsonFileMemory(Path(args.root))
+
+    try:
+        pack_raw = memory.get(
+            args.client, EXECUTION_TASK_PACK_KIND, TASK_PACK_SINGLETON
+        )
+    except EntityNotFound:
+        print(
+            f"error: no CampaignExecutionTaskPack for client {args.client!r} "
+            f"under {args.root}; run `mkt build-tasks` first.",
+            file=out,
+        )
+        return 2
+    pack = CampaignExecutionTaskPack.model_validate(pack_raw)
+
+    planner = NotionSyncPlanner(memory=memory)
+    plan = planner.plan(pack)
+    planner.persist(plan)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "notion-sync-plan.md"
+    md_path.write_text(render_markdown_plan(plan), encoding="utf-8")
+    json_path = outputs_dir / "notion-sync-plan.json"
+    json_path.write_text(plan.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "plan_id": plan.plan_id,
+        "client_slug": plan.client_slug,
+        "task_pack_id": plan.task_pack_id,
+        "contract_version": plan.contract_version,
+        "blocks_publish": plan.blocks_publish,
+        "stats": {
+            "total_tasks": plan.stats.total_tasks,
+            "would_create": plan.stats.would_create,
+            "skip_blocked": plan.stats.skip_blocked,
+            "skip_invalid": plan.stats.skip_invalid,
+            "issues_total": plan.stats.issues_total,
+            "issues_error": plan.stats.issues_error,
+            "issues_warning": plan.stats.issues_warning,
+            "issues_info": plan.stats.issues_info,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": plan.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -965,6 +1033,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory for the Markdown + JSON + Notion-payload files (default: outputs/)",
     )
     p_bt.set_defaults(func=_cmd_build_tasks)
+
+    # notion-plan (MKT-5A)
+    p_np = subs.add_parser(
+        "notion-plan",
+        help=(
+            "build the Notion sync DRY RUN plan from the persisted execution "
+            "task pack. Does NOT call Notion, does NOT use credentials."
+        ),
+    )
+    p_np.add_argument("--client", required=True, help="client slug")
+    p_np.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_np.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where notion-sync-plan.{md,json} are written (default: outputs/)",
+    )
+    p_np.set_defaults(func=_cmd_notion_plan)
 
     # intake
     p_in = subs.add_parser(
