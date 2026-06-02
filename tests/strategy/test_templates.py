@@ -176,7 +176,9 @@ def test_social_drafts_use_recommended_channels(brief: StrategyInputBrief) -> No
     drafts = generate_social_post_drafts(brief, vp, rec, kp)
     assert drafts
     used_channels = {d.channel for d in drafts}
-    rec_channels = {c.channel_type for c in rec.channels[:3]}
+    # MKT-4D: drafts now span up to 5 recommended channels (was 3) so
+    # each channel gets its own channel-specific copy.
+    rec_channels = {c.channel_type for c in rec.channels[:5]}
     assert used_channels.issubset(rec_channels)
 
 

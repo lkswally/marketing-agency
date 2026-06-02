@@ -344,6 +344,9 @@ class _InputBrand(DomainModel):
     lexicon_dont: list[str] = Field(default_factory=list)
     banned_words: list[str] = Field(default_factory=list)
     claim_style: str | None = None
+    # MKT-4D: concrete patterns the templates should imitate / avoid.
+    good_examples: list[str] = Field(default_factory=list)
+    bad_examples: list[str] = Field(default_factory=list)
 
 
 class _InputProduct(DomainModel):

@@ -286,3 +286,43 @@ El siguiente paso natural NO es MCP, n8n ni servicios externos. Es **MKT-4D: Tem
 Costo estimado MKT-4D: 1-2 sesiones, ~300 LOC de templates + 20-30 tests. Sin nueva arquitectura.
 
 Después de MKT-4D recién tiene sentido invertir en imagen real, MCP, n8n. Hoy hacerlo es construir sobre contenido genérico.
+
+---
+
+## Addendum (MKT-4D ejecutado · 2026-06-01)
+
+MKT-4D atacó los issues P-4C.1 → P-4C.7 con un único módulo nuevo (`core/strategy/style.py`, ~280 LOC) más refactor quirúrgico de `templates.py`. Resultado contra el mismo intake:
+
+### Antes / Después
+
+| Aspecto | Antes (MKT-4C) | Después (MKT-4D) |
+|---|---|---|
+| Headline | `MARKETING-AGENCY-OS: Diseñado específicamente para Agencias chicas de marketing` | `MARKETING-AGENCY-OS: determinístico para resolver falta de tiempo.` |
+| Big idea | mismo placeholder | mismo headline real |
+| Hashtags | `#Diseado`, `#DeveloperToolsForMarketingTeams` | `#Auditable`, `#Deterministico`, `#MarketingAgencyOs` |
+| Cluster names | `sin_informational`, `diseado_informational`, `setup_informational`, `marketing-agency-os_informational` | `resuelve_informational`, `pipeline_informational`, `mide_informational`, `marketing-agency-os_informational` |
+| Social copy variation | 5 posts con el MISMO body | 5 posts con hooks + bodies distintos por canal (newsletter / blog / linkedin / x / instagram) |
+| Preferred words en copy | 0 menciones | 5 menciones (1 por post) + 2 hashtags + 1 en headline + 1-2 en emails |
+| Email #1 opener | placeholder | `"Sin vueltas: este recorrido apunta a un objetivo concreto: ... (determinístico)"` (tone opener + preferred word) |
+| Email #2 opener | placeholder | `"Sin vueltas: resumido en una palabra: auditable."` + diffs reales |
+| Reels #1 voiceover | `"MARKETING-AGENCY-OS cambia eso porque Diseñado específicamente para Agencias chicas de marketing."` (mal armado) | `"Con MARKETING-AGENCY-OS eso cambia — determinístico."` (gramatical + preferred word) |
+| Reels #2 voiceover | `"Error 1, error 2, error 3."` (literal placeholder) | `"Resuelve un dolor concreto: Falta de tiempo. Pipeline determinístico... Mide impacto contra: ..."` (diffs reales) |
+| Forbidden words detection | ninguna | scanner en risk_assessment; HIGH severity por hit, con word boundary + accent-fold |
+| Bad examples detection | ninguna | matcher heurístico de bigramas distintivos |
+| `"Diseñado específicamente"` en outputs | aparecía 6 veces | **0 ocurrencias** (verificado por test) |
+
+### Issues que sobreviven (deferred)
+
+- **Gramática de adjetivos**: `tone_adjective` devuelve forma masculina (`preciso`, `directo`). Frase como *"3 decisiones precisos"* (debería ser *precisas*) — necesita concordancia por género. P-4D.1.
+- **Capitalización tras `:`**: `"Sin vueltas: resumido en una palabra"` → primera letra después de `:` debería ir en mayúscula en ciertos contextos. P-4D.2.
+- **`good_examples` injection real**: el helper `matches_bad_example_pattern` existe pero no hay uso simétrico de `good_examples` para *sembrar* contenido (solo se usan para flag negativo via su contraparte). P-4D.3.
+- **Email #3 sigue con `[Insertar 2 casos cortos — pending revisión humana.]`** — honesto, pero sin contenido real. P-4D.4.
+- **`Resuelve un dolor concreto: Falta de tiempo`** se repite como differentiator en muchas superficies (~6). El placeholder de MKT-4C se reemplazó pero la nueva frase sigue siendo demasiado prominente. P-4D.5.
+
+### Validación
+
+- Suite completa: **948 passed** (+63 nuevos)
+- Ruff: limpio
+- ATLAS HEAD: intacto
+- Backward compat: demo intake (`demo-business.json`) sigue funcionando — tests existentes 100% verdes (1 actualización menor en `test_social_drafts_use_recommended_channels` para reflejar `[:5]` vs `[:3]`).
+- Forbidden words detection: probado con inyección artificial de `disruptivo` en `preferred_words` → detectado correctamente, HIGH severity registrado en risk_assessment.

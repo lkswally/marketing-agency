@@ -843,3 +843,57 @@ Detected by running the pipeline on a real intake (`examples/intake/marketing-ag
 - **Introduced:** MKT-4C
 - **Why deferred:** `_rationale_for_channel(ch, audience)` returns the same template (`"Match con audiencia ({label}); rol esperado: {role}"`) for every channel. Channels have distinct dynamics (LinkedIn algorithm, X engagement, newsletter open rates) that the rationale should reflect.
 - **Resolves at:** MKT-4D.
+
+---
+
+## MKT-4C items resolved in MKT-4D
+
+- **P-4C.1** (brand_tone ignored) — **✅ resolved** via `tone_adjective` / `tone_connector` / `tone_opener` helpers used in social copies + email openers.
+- **P-4C.2** (preferred_words not injected) — **✅ resolved** via `pick_preferred_word` woven into headline, hashtags, social copies (1 per channel), email openers.
+- **P-4C.3** (placeholder phrase reused 6×) — **✅ resolved** by rewriting `generate_value_proposition` to compose headlines from real intake content. Pinned by `tests/strategy/test_content_quality.py` (5 tests assert the phrase never appears in headline, big_idea, email bodies, social copies, reels voiceovers).
+- **P-4C.4** (keyword junk clusters) — **✅ resolved** via `first_meaningful_token` + Spanish stopword filter + `is_meaningful_keyword` rejection of stopwords / short / generic tokens.
+- **P-4C.5** (hashtag accent strip) — **✅ resolved** via `make_hashtag` with Unicode NFD normalization. Pinned by `test_hashtag_for_accented_word_uses_nfd` + `test_hashtag_for_diseado_never_appears`.
+- **P-4C.7** (good/bad examples ignored) — **✅ partially resolved** for bad_examples (matched as pattern → MEDIUM risk) and forbidden_words (matched against generated corpus → HIGH risk). Good_examples positive injection deferred to P-4D.3.
+
+Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (buyer persona placeholders), P-4C.9 (partial; prose-only intakes still trigger false positive), P-4C.10 (channel rationale identical).
+
+---
+
+## From MKT-4D (template content quality pass)
+
+### P-4D.1 — `tone_adjective` returns masculine form only
+- **Introduced:** MKT-4D
+- **Why deferred:** Produces grammar errors when applied to feminine nouns. Example: `"3 decisiones precisos"` (should be `precisas`). Needs gender-agreement infrastructure or per-call gender hint from the template.
+- **Resolves at:** when an intake surfaces a feminine-noun-in-headline pattern that's worth fixing.
+- **Sketch:** add a `tone_adjective(tone_words, *, gender="m"|"f")` parameter; templates pass the gender based on the noun being modified.
+
+### P-4D.2 — Inconsistent capitalization after `:` in composed strings
+- **Introduced:** MKT-4D
+- **Why deferred:** Cosmetic. Some composed strings keep the second clause lowercase. Spanish style guides differ on this; not a hard bug.
+- **Resolves at:** if a user complains.
+
+### P-4D.3 — `good_examples` not used to seed content
+- **Introduced:** MKT-4D
+- **Why deferred:** `matches_bad_example_pattern` handles the negative case. The symmetric positive case (using `good_examples` to actually generate at least one copy in that style) needs a simple template selector. Out of scope for the cleanup pass.
+- **Resolves at:** when a real intake shows good_examples concrete enough to template against.
+
+### P-4D.4 — Email #3 still emits `[Insertar 2 casos cortos]` literal
+- **Introduced:** MKT-4D (carries over from MKT-3A)
+- **Why deferred:** Template explicitly defers customer cases to human review. Could be replaced with a `case_studies` field in the intake schema.
+- **Resolves at:** when a case_studies intake field is designed.
+
+### P-4D.5 — Single differentiator repeats across surfaces
+- **Introduced:** MKT-4D
+- **Why deferred:** With the placeholder gone, `differentiators[0]` (often `"Resuelve un dolor concreto: <pain>"`) appears in headline, big_idea, social bodies, reels voiceover. Less bad than the old placeholder, but still repetitive.
+- **Resolves at:** next quality pass.
+- **Sketch:** templates referencing `differentiators[0]` should rotate by surface kind so each emphasizes a different diff.
+
+### P-4D.6 — Tone families catalog is small (10 families)
+- **Introduced:** MKT-4D
+- **Why deferred:** `_TONE_FAMILIES` covers patterns we have evidence for. Real intakes will surface new descriptors (`sarcástico`, `académico`) that fall back to neutral.
+- **Resolves at:** when a real intake uses an unmapped tone word.
+
+### P-4D.7 — Connector mid-sentence styling
+- **Introduced:** MKT-4D
+- **Why deferred:** `"concretamente,"` mid-sentence reads OK but starts lowercase when it's the second clause separator. Could be styled by context.
+- **Resolves at:** with P-4D.2.

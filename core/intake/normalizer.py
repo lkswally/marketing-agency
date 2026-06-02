@@ -92,6 +92,8 @@ def normalize_intake(
         lexicon_dont=[],
         banned_words=list(intake.forbidden_words),
         claim_style=intake.claim_style,
+        good_examples=list(intake.good_examples),
+        bad_examples=list(intake.bad_examples),
     )
 
     # ---- Product ----
@@ -111,14 +113,18 @@ def normalize_intake(
     # estrategia...". The client_name is invariably cleaner.
     if short_name.endswith("...") and intake.client_name:
         short_name = intake.client_name[:_SHORT_NAME_MAX]
-    # When we shortened the name (whether by splitter or by fallback to
-    # client_name), the prose AFTER the short name is an elevator-pitch /
-    # value-prop fragment. Surface it as an explicit value prop so the
-    # strategy templates AND the claim audit see it. Without this,
-    # downstream claim-detection misses risky words that the user wrote
-    # in product_or_service.
+    # When we shortened the name BY SPLITTING (short_name is a real
+    # prefix of the prose), the suffix after the separator is an
+    # elevator-pitch / value-prop fragment. Surface it as an explicit
+    # value prop so the strategy templates AND the claim audit see it.
+    # If short_name came from the client_name fallback (NOT a prefix
+    # of the prose), DO NOT slice the prose — that produces meaningless
+    # mid-word cuts. Fixed in MKT-4D after first-pass quality review.
     extracted_value_props: list[str] = []
-    if short_name != intake.product_or_service:
+    if (
+        short_name != intake.product_or_service
+        and intake.product_or_service.startswith(short_name)
+    ):
         tail = intake.product_or_service[len(short_name):].lstrip(" —-–:|(")
         if tail and tail not in short_name:
             extracted_value_props.append(tail.strip())

@@ -372,7 +372,16 @@ class W7TemplatedAgentBackend(AgentBackend):
         )
 
         checklist = templates.generate_approval_checklist()
-        risks = templates.generate_risk_assessment(value_prop, bench)
+
+        # MKT-4D: feed the risk_assessment with the brief + a concatenated
+        # corpus of all generated text. The risk template scans for
+        # forbidden words and bad_example patterns and adds high-severity
+        # risks the human MUST resolve before approving.
+        brief = self._read_brief(client_slug)
+        corpus = _collect_generated_corpus(self._memory, client_slug)
+        risks = templates.generate_risk_assessment(
+            value_prop, bench, brief=brief, generated_corpus=corpus
+        )
 
         self._put(client_slug, APPROVAL_CHECKLIST_KIND, SINGLETON_ID, checklist)
         self._put(client_slug, RISK_ASSESSMENT_KIND, SINGLETON_ID, risks)
@@ -426,6 +435,33 @@ def load_input_brief_from_file(path) -> StrategyInputBrief:
 
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     return StrategyInputBrief.model_validate(data)
+
+
+def _collect_generated_corpus(memory: Memory, client_slug: str) -> str:
+    """MKT-4D: concatenate the generated COPY from persisted artifacts so
+    the risk assessment can scan it for forbidden words / bad-example
+    patterns. Safe to call when some artifacts are missing — returns
+    an empty string if nothing is present.
+
+    Notably EXCLUDES the ``creative_brief_pack`` because that pack
+    legitimately echoes ``brand.banned_words`` inside its ``do_not_use``
+    field (meta-usage, not generated copy). Scanning it would produce
+    false positives for every banned word in the intake.
+    """
+    pieces: list[str] = []
+    for kind in (
+        VALUE_PROPOSITION_KIND,
+        CAMPAIGN_STRATEGY_KIND,
+        SOCIAL_POSTS_KIND,
+        EMAIL_SEQUENCE_KIND,
+        REELS_PACK_KIND,
+    ):
+        try:
+            raw = memory.get(client_slug, kind, SINGLETON_ID)
+        except Exception:  # noqa: BLE001 — best-effort scan, never blocks
+            continue
+        pieces.append(json.dumps(raw, ensure_ascii=False))
+    return "\n".join(pieces)
 
 
 # ---------- Backward-compatible alias (MKT-4A) ----------

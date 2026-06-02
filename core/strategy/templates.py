@@ -12,7 +12,6 @@ future block that requires the safety boundaries from
 
 from __future__ import annotations
 
-import re
 from datetime import date, timedelta
 
 from core.domain.base import new_id
@@ -48,6 +47,15 @@ from .models import (
     ValueProposition,
     _InputCompetitor,
 )
+from .style import (
+    first_meaningful_token,
+    is_meaningful_keyword,
+    make_hashtag,
+    pick_preferred_word,
+    tone_adjective,
+    tone_connector,
+    tone_opener,
+)
 
 # ---------- Constants ----------
 
@@ -63,15 +71,23 @@ _GENERIC_HASHTAGS = ["#marketing", "#growth", "#strategy"]
 # ---------- Helpers ----------
 
 def _slugify_keyword(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\s-]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    """Backward-compatible facade over :func:`style.normalize_for_slug`.
+
+    Kept so callers outside this file continue to work; new code in this
+    module uses ``normalize_for_slug`` directly.
+    """
+    from .style import normalize_for_slug
+
+    return normalize_for_slug(text)
 
 
 def _hashtagify(text: str) -> str:
-    text = re.sub(r"[^A-Za-z0-9]", "", text.title())
-    return f"#{text}" if text else ""
+    """Backward-compatible facade over :func:`style.make_hashtag`.
+
+    Returns ``""`` instead of ``None`` for compatibility with callers
+    that check truthiness.
+    """
+    return make_hashtag(text) or ""
 
 
 def _estimated_size_band(size: int | None) -> str:
@@ -225,11 +241,34 @@ def generate_buyer_persona(audience: TargetAudience, brief: StrategyInputBrief) 
 def generate_value_proposition(
     brief: StrategyInputBrief, audience: TargetAudience
 ) -> ValueProposition:
-    differentiators = list(brief.product.value_props) or [
-        f"Diseñado específicamente para {audience.label}",
-        "Setup en menos de un día",
-        "Sin contratos largos",
-    ]
+    """Compose a value proposition from real intake content.
+
+    Replaces the MKT-3A placeholder ``"X: Diseñado específicamente para Y"``
+    (documented in MKT-4C P-4C.3) with a headline derived from concrete
+    intake fields, in priority order:
+
+    1. The first declared ``product.value_props`` entry (when the
+       normalizer extracted one from ``product_or_service``).
+    2. An intake-specific phrase using ``audience pains`` + a preferred
+       word from the brand lexicon when available.
+    3. A last-resort headline that still avoids the placeholder.
+
+    The placeholder ``"Diseñado específicamente"`` is NEVER emitted.
+    """
+    # ---- Differentiators ----
+    declared = list(brief.product.value_props)
+    fallback_diffs = _fallback_differentiators(brief, audience)
+    differentiators = (declared + fallback_diffs)[:5] or fallback_diffs
+
+    # ---- Headline (no placeholder allowed) ----
+    pref_word = pick_preferred_word(brief.brand.lexicon_do)
+    headline = _compose_value_headline(
+        brief=brief,
+        audience=audience,
+        differentiator=differentiators[0] if differentiators else None,
+        preferred=pref_word,
+    )
+
     proof_points = [
         f"Producto/servicio: {brief.product.name}",
         *(
@@ -238,11 +277,9 @@ def generate_value_proposition(
             else []
         ),
     ]
+
     return ValueProposition(
-        headline=_truncate(
-            f"{brief.product.name}: {differentiators[0]}",
-            280,
-        ),
+        headline=_truncate(headline, 280),
         category=brief.client.industry or "marketing tooling",
         target_audience_label=audience.label,
         differentiators=differentiators[:5],
@@ -250,6 +287,62 @@ def generate_value_proposition(
         primary_benefit=differentiators[0] if differentiators else None,
         notes=brief.additional_context,
     )
+
+
+def _fallback_differentiators(
+    brief: StrategyInputBrief, audience: TargetAudience
+) -> list[str]:
+    """Build differentiators from concrete intake data when
+    ``product.value_props`` is empty. Never returns the legacy
+    placeholder."""
+    out: list[str] = []
+    pains = audience.pain_points or []
+    if pains:
+        out.append(f"Resuelve un dolor concreto: {pains[0]}")
+    if brief.product.description:
+        # First sentence of the description; capped.
+        first_sentence = brief.product.description.split(".")[0].strip()
+        if first_sentence and len(first_sentence) > 12:
+            out.append(_truncate(first_sentence, 160))
+    if brief.objective:
+        out.append(_truncate(f"Mide impacto contra: {brief.objective}", 160))
+    # Generic backstops that don't echo audience/product names.
+    out.extend([
+        "Setup en menos de un día",
+        "Sin contratos largos",
+    ])
+    return out
+
+
+def _compose_value_headline(
+    *,
+    brief: StrategyInputBrief,
+    audience: TargetAudience,
+    differentiator: str | None,
+    preferred: str | None,
+) -> str:
+    """Compose a non-placeholder headline. Tries three forms in order
+    of specificity and returns the first one that actually contains
+    intake-derived content."""
+    product = brief.product.name
+    pain = (audience.pain_points or [None])[0]
+
+    # Form 1: pain-led, with preferred word if available.
+    if pain:
+        if preferred:
+            return f"{product}: {preferred} para resolver {pain.lower()}."
+        return f"{product}: enfocado en resolver {pain.lower()}."
+
+    # Form 2: differentiator-led (avoids the placeholder by virtue of
+    # _fallback_differentiators never returning it).
+    if differentiator:
+        return f"{product}: {differentiator}."
+
+    # Form 3: objective-led last resort.
+    if brief.objective:
+        return f"{product} — diseñado alrededor de: {brief.objective}."
+
+    return f"{product}: la propuesta concreta para {audience.label}."
 
 
 def generate_competitor_benchmark(competitors: list[_InputCompetitor]) -> CompetitorBenchmark:
@@ -373,15 +466,45 @@ def generate_keyword_plan(
     audience: TargetAudience,
     value_prop: ValueProposition,
 ) -> KeywordPlan:
+    """Build keyword + hashtag plan from real intake content.
+
+    Replaces MKT-3A's naive ASCII slug + token split (P-4C.4, P-4C.5)
+    with Unicode-aware normalization (NFD) + Spanish stopword filter
+    + minimum-length / generic-token rejection. Junk seeds like
+    ``sin``, ``diseado``, ``setup`` are dropped.
+    """
+    # ---- Seeds (curated for meaningfulness) ----
+    from .style import normalize_for_slug
+
     seeds: list[str] = []
-    seeds.append(brief.product.name.lower())
+
+    # Product name slug — always kept if meaningful.
+    product_slug = normalize_for_slug(brief.product.name)
+    if product_slug and is_meaningful_keyword(product_slug.split(" ")[0]):
+        seeds.append(product_slug)
+
+    # Industry slug — kept as a multi-word phrase.
     if brief.client.industry:
-        seeds.append(brief.client.industry.lower())
+        industry_slug = normalize_for_slug(brief.client.industry)
+        if industry_slug:
+            seeds.append(industry_slug)
+
+    # First meaningful token from each top differentiator — filters out
+    # stopwords (``sin``), generic tokens (``setup``), short verbs
+    # (``diseado``).
     for d in value_prop.differentiators[:3]:
-        seeds.append(_slugify_keyword(d).split(" ")[0])
+        tok = first_meaningful_token(d)
+        if tok and tok not in seeds:
+            seeds.append(tok)
 
-    audience_token = _slugify_keyword(audience.label).split(" ")[0]
+    # Audience first meaningful token, or product slug as fallback.
+    audience_token = (
+        first_meaningful_token(audience.label)
+        or product_slug.split(" ")[0]
+        or "equipos"
+    )
 
+    # ---- Clusters ----
     clusters: list[KeywordCluster] = []
     for seed in seeds[:5]:
         clusters.append(
@@ -398,34 +521,37 @@ def generate_keyword_plan(
             )
         )
 
-    if brief.product.name:
+    if product_slug:
         clusters.append(
             KeywordCluster(
-                label=f"{brief.product.name.lower()}_transactional",
+                label=f"{product_slug}_transactional",
                 intent="transactional",
                 keywords=[
-                    f"comprar {brief.product.name.lower()}",
-                    f"{brief.product.name.lower()} precio",
-                    f"{brief.product.name.lower()} alternativa",
-                    f"contratar {brief.product.name.lower()}",
+                    f"comprar {product_slug}",
+                    f"{product_slug} precio",
+                    f"{product_slug} alternativa",
+                    f"contratar {product_slug}",
                 ],
                 suggested_match="exact",
             )
         )
 
+    # ---- Negatives ----
     competitor_negatives = [c.name.lower() for c in brief.competitors_known]
     negatives = sorted(set([*_GENERIC_NEGATIVES, *competitor_negatives]))
 
-    hashtags_seed = []
-    for s in seeds[:3]:
-        h = _hashtagify(s)
-        if h:
-            hashtags_seed.append(h)
+    # ---- Hashtags (Unicode-aware) ----
+    hashtags_set: set[str] = set(_GENERIC_HASHTAGS)
+    candidates = [brief.product.name]
     if brief.client.industry:
-        h = _hashtagify(brief.client.industry)
+        candidates.append(brief.client.industry)
+    # Up to 2 preferred words as hashtags — the client picked them.
+    candidates.extend(brief.brand.lexicon_do[:2])
+    for c in candidates:
+        h = make_hashtag(c)
         if h:
-            hashtags_seed.append(h)
-    hashtags = sorted(set([*hashtags_seed, *_GENERIC_HASHTAGS]))[:10]
+            hashtags_set.add(h)
+    hashtags = sorted(hashtags_set)[:10]
 
     return KeywordPlan(
         clusters=clusters[:6],
@@ -599,39 +725,85 @@ def generate_social_post_drafts(
     keyword_plan: KeywordPlan,
 ) -> list[SocialPostDraft]:
     drafts: list[SocialPostDraft] = []
-    hook_templates = [
-        "Si {persona}, probablemente esto te suena: {pain}.",
-        "La forma en la que la mayoría hace {topic} está rota. Acá hay otra.",
-        "3 cosas que aprendimos construyendo {product}.",
-        "{stat}% de {persona} pierde tiempo en {pain}. Acá una alternativa.",
-    ]
-    body_template = "{value} — y por eso {product} existe. {differentiator}."
-    cta_template = "Conocé cómo →"
-    persona_token = brief.audience_hints[0].label.lower()
-    pain_token = "tareas repetitivas"
     product = brief.product.name
+    persona_token = brief.audience_hints[0].label.lower()
     topic = brief.client.industry or "esto"
+    pain_token = (
+        brief.audience_hints[0].psychographics.get("pains", "tareas repetitivas").split("|")[0]
+        if brief.audience_hints[0].psychographics.get("pains")
+        else "tareas repetitivas"
+    )
+    diff = value_prop.differentiators[0] if value_prop.differentiators else "Te ahorra tiempo"
 
-    for i, ch in enumerate(channels.channels[:3]):
-        hook = hook_templates[i % len(hook_templates)].format(
-            persona=persona_token,
-            pain=pain_token,
-            topic=topic,
-            product=product,
-            stat="80",
+    # Tone-aware connector + adjective, picked once per run.
+    adjective = tone_adjective(brief.brand.tone_words)
+    connector = tone_connector(brief.brand.tone_words)
+
+    # Channel-specific copy. Each channel gets its OWN hook + body so
+    # the output stops being a template echo across 3+ surfaces.
+    channel_voices: dict[str, tuple[str, str, str]] = {
+        # channel_value: (hook_template, body_template, cta)
+        "newsletter": (
+            "Esta semana, un experimento {adjective}: {pain} sin la opción de siempre.",
+            "Lo que probamos: usar {product} para algo {adjective} que veníamos posponiendo. "
+            "{connector}, {diff}. Te dejamos el detalle abajo — un caso, dos números, una decisión.",
+            "Leer el caso →",
+        ),
+        "blog": (
+            "Cómo hicimos {topic} sin {pain}: un walkthrough.",
+            "Documentamos paso por paso. Stack, decisiones, los puntos donde nos equivocamos. "
+            "{connector}, {diff}.",
+            "Leer el post →",
+        ),
+        "linkedin": (
+            "3 decisiones {adjective}s que tomamos esta semana en {product}.",
+            "{connector}, las comparto sin filtro: qué probamos, qué descartamos, "
+            "qué dejamos andando. {diff}.",
+            "Ver el detalle →",
+        ),
+        "x": (
+            "{product}, en {short_diff}.",
+            "Para {persona} que se cansaron de {pain}. {connector}, así lo armamos.",
+            "Mirá →",
+        ),
+        "instagram": (
+            "El problema no era la herramienta. Era cómo la usábamos.",
+            "Carrusel con la decisión, el cambio y el resultado. {connector}, {diff}.",
+            "Ver carrusel →",
+        ),
+    }
+    default_voice = (
+        "{product}: lo que probamos esta semana.",
+        "{connector}, {diff}.",
+        "Conocé cómo →",
+    )
+
+    short_diff = _truncate(diff, 60)
+
+    # Pull a preferred word per channel so the lexicon shows up but
+    # not always the same word in every post.
+    pref_iter = iter(brief.brand.lexicon_do)
+
+    for i, ch in enumerate(channels.channels[:5]):
+        hook_t, body_t, cta_t = channel_voices.get(ch.channel_type.value, default_voice)
+        pref = next(pref_iter, None)
+        format_kwargs = dict(
+            persona=persona_token, pain=pain_token, topic=topic, product=product,
+            adjective=adjective, connector=connector, diff=diff,
+            short_diff=short_diff,
         )
-        body = body_template.format(
-            value=value_prop.headline,
-            product=product,
-            differentiator=value_prop.differentiators[0] if value_prop.differentiators else "Te ahorra tiempo",
-        )
+        hook = hook_t.format(**format_kwargs)
+        body = body_t.format(**format_kwargs)
+        # Weave one preferred word in if it's not already in the body.
+        if pref and pref.lower() not in body.lower():
+            body = f"{body} ({pref})"
         drafts.append(
             SocialPostDraft(
                 post_id=new_id(),
                 channel=ch.channel_type,
                 hook=_truncate(hook, 300),
                 body=body,
-                cta=cta_template,
+                cta=cta_t,
                 hashtags=keyword_plan.hashtags[:4],
                 suggested_send_at=f"Semana {i + 1} · mar 10:00",
             )
@@ -646,6 +818,12 @@ def generate_email_sequence(
 ) -> EmailSequenceDraft:
     product = brief.product.name
     diffs = value_prop.differentiators or [value_prop.headline]
+    opener = tone_opener(brief.brand.tone_words)
+    pref1 = pick_preferred_word(brief.brand.lexicon_do)
+    pref2 = pick_preferred_word(brief.brand.lexicon_do, already_used=[pref1] if pref1 else [])
+    objective = brief.objective
+
+    pref1_phrase = f" ({pref1})" if pref1 else ""
 
     emails: list[EmailDraft] = [
         EmailDraft(
@@ -655,7 +833,7 @@ def generate_email_sequence(
             preview_text=_truncate("Empezamos por lo más importante.", 140),
             body=(
                 f"Hola,\n\nGracias por sumarte a {product}.\n\n"
-                f"En este recorrido te vamos a mostrar cómo {value_prop.headline.lower()}.\n\n"
+                f"{opener} este recorrido apunta a un objetivo concreto: {objective}{pref1_phrase}.\n\n"
                 "Empezá por acá: revisá la guía de setup (5 min).\n\nAbrazo,\nEl equipo"
             ),
             cta="Ver guía de setup",
@@ -667,7 +845,10 @@ def generate_email_sequence(
             subject=_truncate(f"3 cosas que {product} hace distinto", 80),
             preview_text=_truncate("Lo que cambia respecto al status quo.", 140),
             body=(
-                f"Hola,\n\nAcá van 3 diferenciadores de {product}:\n\n"
+                "Hola,\n\n"
+                + (f"{opener} " if opener else "")
+                + (f"resumido en una palabra: {pref2}.\n\n" if pref2 else "")
+                + f"Tres puntos donde {product} cambia el statu quo:\n\n"
                 + "\n".join(f"• {d}" for d in diffs[:3])
                 + "\n\nSi querés, lo charlamos en 15 minutos.\n\nAbrazo"
             ),
@@ -719,6 +900,19 @@ def generate_reels_script_pack(
 ) -> ReelsScriptPack:
     product = brief.product.name
     diffs = value_prop.differentiators or [value_prop.headline]
+    # MKT-4D: tone-aware reels voiceover. The legacy line
+    # ``f"{product} cambia eso porque {diffs[0]}."`` produced
+    # ungrammatical voiceover when diffs[0] was a noun phrase
+    # ("Diseñado específicamente para X"). The new line is a
+    # complete sentence regardless of differentiator shape.
+    pain_token = (
+        brief.audience_hints[0].psychographics.get("pains", "").split("|")[0]
+        if brief.audience_hints and brief.audience_hints[0].psychographics.get("pains")
+        else "lo mismo de siempre"
+    )
+    pref_word = pick_preferred_word(brief.brand.lexicon_do)
+    pref_suffix = f" — {pref_word}." if pref_word else "."
+
     scripts = [
         ReelsScriptEntry(
             script_id=new_id(),
@@ -733,8 +927,8 @@ def generate_reels_script_pack(
                 "25-30s: CTA",
             ],
             voiceover_lines=[
-                f"La mayoría de {audience.label.lower()} pierde tiempo en lo mismo.",
-                f"{product} cambia eso porque {diffs[0]}.",
+                f"La mayoría de {audience.label.lower()} pierde tiempo en {pain_token}.",
+                f"Con {product} eso cambia{pref_suffix}",
                 "Probalo hoy.",
             ],
             on_screen_text=[
@@ -754,17 +948,21 @@ def generate_reels_script_pack(
             ),
             beats=[
                 "0-3s: anuncio del tema",
-                "3-30s: error 1, error 2, error 3",
+                "3-30s: tres errores concretos",
                 "30-45s: solución (producto)",
                 "45-50s: CTA",
             ],
             voiceover_lines=[
                 "Estos 3 errores los vemos seguido.",
-                "Error 1, error 2, error 3.",
+                # MKT-4D: derived from real diffs when available — used
+                # to literally read "Error 1, error 2, error 3."
+                ". ".join(diffs[:3]) + ".",
                 f"{product} los resuelve.",
                 "Probalo.",
             ],
-            on_screen_text=["Error 1", "Error 2", "Error 3", "Solución"],
+            on_screen_text=[
+                _truncate(d, 40) for d in diffs[:3]
+            ] + ["Solución"],
             cta="Ver más",
             target_duration_s=50,
         ),
@@ -908,6 +1106,8 @@ def generate_approval_checklist() -> ApprovalChecklist:
 def generate_risk_assessment(
     value_prop: ValueProposition,
     competitor_benchmark: CompetitorBenchmark,
+    brief: StrategyInputBrief | None = None,
+    generated_corpus: str | None = None,
 ) -> RiskAssessment:
     risks: list[RiskItem] = []
 
@@ -931,6 +1131,47 @@ def generate_risk_assessment(
                 mitigation="Investigar 3–5 competidores reales antes de lanzar.",
             )
         )
+
+    # MKT-4D: forbidden words from brand.banned_words scanned against
+    # generated text. Each hit becomes a high-severity risk so the
+    # human reviewer sees it before approving.
+    if brief and generated_corpus and brief.brand.banned_words:
+        from .style import contains_forbidden, matches_bad_example_pattern
+
+        found = contains_forbidden(generated_corpus, brief.brand.banned_words)
+        for word in found:
+            risks.append(
+                RiskItem(
+                    risk_id=new_id(),
+                    description=f"Palabra prohibida detectada en outputs: '{word}'",
+                    severity="high",
+                    mitigation=(
+                        "Reescribir la pieza que contiene la palabra. El intake "
+                        "del cliente declaró esta palabra como prohibida."
+                    ),
+                    claim_text=word,
+                )
+            )
+
+        # bad_examples — flag pieces that fit a known anti-pattern.
+        bad_hits = matches_bad_example_pattern(
+            generated_corpus, brief.brand.bad_examples
+        )
+        for example in bad_hits:
+            risks.append(
+                RiskItem(
+                    risk_id=new_id(),
+                    description=(
+                        "Output coincide con un patrón marcado como bad_example: "
+                        f"'{_truncate(example, 80)}'"
+                    ),
+                    severity="medium",
+                    mitigation=(
+                        "Revisar la pieza coincidente y reescribir alineada a "
+                        "los good_examples del intake."
+                    ),
+                )
+            )
 
     risks.append(
         RiskItem(
