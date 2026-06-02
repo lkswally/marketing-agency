@@ -428,6 +428,125 @@ def _cmd_build_visuals(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
+    """Build a CampaignExecutionTaskPack (MKT-4E) from persisted artifacts.
+
+    Reads the CampaignStrategyReport (required), and optionally the
+    ApprovalPack, CreativeAssetPack, and VisualDirectionPack from
+    Memory under ``--client <slug>``. Builds the task pack, persists
+    it to Memory, writes Markdown + JSON + Notion-payload JSON to
+    ``--outputs-dir``, and prints a small JSON summary.
+
+    Exit codes:
+    - 0 on success
+    - 2 when the strategy report is missing for ``--client``
+    """
+    import contextlib
+
+    from core.approval import APPROVAL_PACK_KIND, ApprovalPack
+    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
+    from core.contracts import AuditEventType, AuditTrailEvent
+    from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack
+    from core.creative import SINGLETON_ID as CREATIVE_SINGLETON
+    from core.domain.base import utcnow as _utcnow
+    from core.execution import (
+        TaskFactory,
+        render_markdown_pack,
+        to_notion_payload,
+    )
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
+    from core.visual import SINGLETON_ID as VISUAL_SINGLETON
+    from core.visual import VISUAL_PACK_KIND, VisualDirectionPack
+
+    memory = JsonFileMemory(Path(args.root))
+
+    try:
+        report_raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
+    except EntityNotFound:
+        print(
+            f"error: no CampaignStrategyReport for client {args.client!r} "
+            f"under {args.root}; run `mkt run-strategy` first.",
+            file=out,
+        )
+        return 2
+    report = CampaignStrategyReport.model_validate(report_raw)
+
+    approval = None
+    with contextlib.suppress(EntityNotFound):
+        approval = ApprovalPack.model_validate(
+            memory.get(args.client, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
+        )
+
+    creative = None
+    with contextlib.suppress(EntityNotFound):
+        creative = CreativeAssetPack.model_validate(
+            memory.get(args.client, CREATIVE_PACK_KIND, CREATIVE_SINGLETON)
+        )
+
+    visual = None
+    with contextlib.suppress(EntityNotFound):
+        visual = VisualDirectionPack.model_validate(
+            memory.get(args.client, VISUAL_PACK_KIND, VISUAL_SINGLETON)
+        )
+
+    factory = TaskFactory(memory=memory)
+    pack = factory.build(report, approval, creative, visual)
+    factory.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "campaign-execution-tasks.md"
+    md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
+    json_path = outputs_dir / "campaign-execution-tasks.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+    notion_path = outputs_dir / "notion-task-payload.json"
+    notion_path.write_text(
+        json.dumps(to_notion_payload(pack), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    # Audit.
+    prev = memory.last_audit_hash(args.client)
+    event = AuditTrailEvent.build(
+        event_type=AuditEventType.NOTE,
+        actor="build_tasks_cli",
+        occurred_at=_utcnow(),
+        client_slug=args.client,
+        payload={
+            "execution_task_pack": {
+                "pack_id": pack.pack_id,
+                "client_slug": pack.client_slug,
+                "total_tasks": pack.total_tasks,
+                "blocks_publish": pack.blocks_publish,
+                "action": "built",
+            }
+        },
+        prev_hash=prev,
+    )
+    memory.append_audit_event(event)
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "report_id": pack.report_id,
+        "approval_pack_id": pack.approval_pack_id,
+        "creative_pack_id": pack.creative_pack_id,
+        "visual_pack_id": pack.visual_pack_id,
+        "blocks_publish": pack.blocks_publish,
+        "total_tasks": pack.total_tasks,
+        "count_by_state": pack.count_by_state(),
+        "count_by_priority": pack.count_by_priority(),
+        "count_by_category": pack.count_by_category(),
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "notion_payload_path": str(notion_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -825,6 +944,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="fail with exit 3 when the Approval Pack blocks publish",
     )
     p_bv.set_defaults(func=_cmd_build_visuals)
+
+    # build-tasks (MKT-4E)
+    p_bt = subs.add_parser(
+        "build-tasks",
+        help=(
+            "build a CampaignExecutionTaskPack from the persisted strategy + "
+            "approval + creative + visual packs. Notion-ready; does NOT call Notion."
+        ),
+    )
+    p_bt.add_argument("--client", required=True, help="client slug")
+    p_bt.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_bt.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory for the Markdown + JSON + Notion-payload files (default: outputs/)",
+    )
+    p_bt.set_defaults(func=_cmd_build_tasks)
 
     # intake
     p_in = subs.add_parser(

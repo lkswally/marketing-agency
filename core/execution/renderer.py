@@ -1,0 +1,159 @@
+"""Operational Markdown renderer for the Campaign Execution Task Pack.
+
+Pure function. Same pack → same Markdown.
+"""
+
+from __future__ import annotations
+
+from .models import (
+    CampaignExecutionTaskPack,
+    TaskCategory,
+    TaskPriority,
+    TaskState,
+)
+
+_STATE_EMOJI: dict[str, str] = {
+    "todo": "📋",
+    "blocked": "🛑",
+    "needs_review": "🟡",
+    "approved": "🔵",
+    "ready": "🟢",
+    "done": "✅",
+}
+
+_PRIORITY_EMOJI: dict[str, str] = {
+    "high": "🔴",
+    "medium": "🟠",
+    "low": "⚪",
+}
+
+_CATEGORY_ORDER: list[TaskCategory] = [
+    TaskCategory.APPROVAL,
+    TaskCategory.DESIGN,
+    TaskCategory.SEO,
+    TaskCategory.EMAIL,
+    TaskCategory.SOCIAL,
+    TaskCategory.PUBLISHING,
+    TaskCategory.MEASUREMENT,
+    TaskCategory.OPERATIONAL,
+    TaskCategory.CALENDAR,
+]
+
+
+def render_markdown_pack(pack: CampaignExecutionTaskPack) -> str:
+    parts: list[str] = []
+    parts.append(_render_header(pack))
+    parts.append(_render_summary(pack))
+    for cat in _CATEGORY_ORDER:
+        section = _render_category(pack, cat)
+        if section:
+            parts.append(section)
+    parts.append(_render_footer(pack))
+    return "\n\n".join(parts) + "\n"
+
+
+def _render_header(pack: CampaignExecutionTaskPack) -> str:
+    return (
+        f"# Campaign Execution Task Pack — {pack.client_slug}\n\n"
+        f"- **Pack ID**: `{pack.pack_id}`\n"
+        f"- **Contract**: `{pack.contract_version}`\n"
+        f"- **Rule set**: `{pack.rule_set_id or '—'}`\n"
+        f"- **Report**: `{pack.report_id}` ({pack.report_contract_version})\n"
+        f"- **Approval**: `{pack.approval_pack_id or '—'}`\n"
+        f"- **Creative**: `{pack.creative_pack_id or '—'}`\n"
+        f"- **Visual**: `{pack.visual_pack_id or '—'}`\n"
+        f"- **Generado**: `{pack.created_at.isoformat()}`\n"
+    )
+
+
+def _render_summary(pack: CampaignExecutionTaskPack) -> str:
+    state_counts = pack.count_by_state()
+    prio_counts = pack.count_by_priority()
+    cat_counts = pack.count_by_category()
+    blocks_emoji = "🛑" if pack.blocks_publish else "✅"
+    lines = ["## 01. Resumen"]
+    lines.append(f"- **Total de tareas**: `{pack.total_tasks}`")
+    lines.append(
+        f"- **Bloquea publicación**: {blocks_emoji} `{pack.blocks_publish}`"
+    )
+    if pack.upstream_overall_state:
+        lines.append(
+            f"- **Estado upstream**: `{pack.upstream_overall_state}`"
+        )
+    lines.append("\n**Por estado**:")
+    for s in TaskState:
+        c = state_counts.get(s.value, 0)
+        if c:
+            lines.append(f"- {_STATE_EMOJI[s.value]} `{s.value}`: {c}")
+    lines.append("\n**Por prioridad**:")
+    for p in TaskPriority:
+        c = prio_counts.get(p.value, 0)
+        if c:
+            lines.append(f"- {_PRIORITY_EMOJI[p.value]} `{p.value}`: {c}")
+    lines.append("\n**Por categoría**:")
+    for cat in _CATEGORY_ORDER:
+        c = cat_counts.get(cat.value, 0)
+        if c:
+            lines.append(f"- `{cat.value}`: {c}")
+    return "\n".join(lines)
+
+
+def _render_category(
+    pack: CampaignExecutionTaskPack, category: TaskCategory
+) -> str:
+    tasks = pack.tasks_in_category(category)
+    if not tasks:
+        return ""
+    # Sort: blocked first (loud), then by priority (high → low),
+    # then by title for stability.
+    prio_rank = {"high": 0, "medium": 1, "low": 2}
+    tasks_sorted = sorted(
+        tasks,
+        key=lambda t: (
+            0 if t.state is TaskState.BLOCKED else 1,
+            prio_rank.get(t.priority.value, 9),
+            t.title,
+        ),
+    )
+    lines = [f"## {category.value.title()} ({len(tasks)})"]
+    lines.append("| # | Tarea | Prioridad | Estado | Owner | Asset |")
+    lines.append("|---|-------|-----------|--------|-------|-------|")
+    for i, t in enumerate(tasks_sorted, start=1):
+        state_str = f"{_STATE_EMOJI.get(t.state.value, '·')} `{t.state.value}`"
+        prio_str = f"{_PRIORITY_EMOJI.get(t.priority.value, '·')} `{t.priority.value}`"
+        title = t.title.replace("|", "\\|")
+        owner = t.owner_hint or "—"
+        asset = "—"
+        if t.asset_kind:
+            ref = (t.asset_ref or "")[:16]
+            asset = f"`{t.asset_kind}` {ref}".strip()
+        lines.append(
+            f"| {i} | {title} | {prio_str} | {state_str} | `{owner}` | {asset} |"
+        )
+    # Append a callout for each blocked task with its reason.
+    blocked = [t for t in tasks_sorted if t.state is TaskState.BLOCKED]
+    if blocked:
+        lines.append("\n**Bloqueos**:")
+        for t in blocked:
+            lines.append(
+                f"- 🛑 _{t.title}_ — {t.blocked_reason or 'sin razón explícita'}"
+            )
+    # Append dependencies summary.
+    with_deps = [t for t in tasks_sorted if t.depends_on]
+    if with_deps:
+        lines.append("\n**Dependencias**:")
+        for t in with_deps:
+            lines.append(f"- `{t.task_id[:8]}` ← {len(t.depends_on)} dep(s)")
+    return "\n".join(lines)
+
+
+def _render_footer(pack: CampaignExecutionTaskPack) -> str:
+    return (
+        "---\n\n"
+        f"_Generated by `core.execution` v1 (`{pack.contract_version}`). "
+        "Deterministic, LLM-free. No external API was called. No task was "
+        "actually executed. No piece was published or sent._"
+    )
+
+
+__all__ = ["render_markdown_pack"]

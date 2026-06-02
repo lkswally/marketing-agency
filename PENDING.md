@@ -897,3 +897,42 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-4D
 - **Why deferred:** `"concretamente,"` mid-sentence reads OK but starts lowercase when it's the second clause separator. Could be styled by context.
 - **Resolves at:** with P-4D.2.
+
+---
+
+## From MKT-4E (campaign execution task pack)
+
+### P-4E.1 — Visual direction titles render empty in design tasks
+- **Introduced:** MKT-4E
+- **Why deferred:** `_design_tasks` reads `getattr(d, 'title', '')` from `VisualDirection`, but the upstream model uses a different field name in some shapes. Needs introspection of the actual field (probably `concept_name` or similar) and a one-line fix.
+- **Resolves at:** when `core/visual/models.py` is touched again.
+
+### P-4E.2 — Date-led view of the task pack
+- **Introduced:** MKT-4E
+- **Why deferred:** The Markdown renderer is category-led. Useful for "what's blocking us" reviews but not for weekly stand-ups where the operator wants "what's due this week" first. A date-led variant could live next to `render_markdown_pack`.
+- **Resolves at:** when an operator requests it.
+
+### P-4E.3 — Notion payload schema_version hardcoded
+- **Introduced:** MKT-4E
+- **Why deferred:** `"notion-export.v1"` is a literal string in `notion_payload.py`. Should live next to the pack contract pin (`CAMPAIGN_EXECUTION_TASK_PACK_VERSION`) so a future bump is a one-line change.
+- **Resolves at:** at the first Notion schema revision.
+
+### P-4E.4 — Per-task effort estimate / SLA
+- **Introduced:** MKT-4E
+- **Why deferred:** No `effort_minutes` or `sla_hours` field on `ExecutionTask`. Adding it later is additive but the factory needs heuristics per task kind. Useful for capacity planning.
+- **Resolves at:** when an operator runs more than one campaign in parallel and asks for load balancing.
+
+### P-4E.5 — Owner assignment helper
+- **Introduced:** MKT-4E
+- **Why deferred:** Today only `owner_hint` is populated (a role string). No mapping from role → actual person. Would need a per-tenant "team roster" intake field.
+- **Resolves at:** when a multi-person team starts using the system in production.
+
+### P-4E.6 — Sync the task pack to a real Notion database
+- **Introduced:** MKT-4E
+- **Why deferred:** MKT-4E ships the Notion-ready payload but does NOT call Notion. A separate block (MKT-5A or similar) can add the SDK call behind a `--push-to-notion` flag, with the same opt-in pattern as `--backend claude` (env var + extras).
+- **Resolves at:** future block; explicitly out of scope here.
+
+### P-4E.7 — Per-channel publishing tool selection
+- **Introduced:** MKT-4E
+- **Why deferred:** Social publishing task description says "Cargar la pieza en la herramienta de publicación del canal". The actual tool (Buffer, Hootsuite, Later, native) is undetermined. Could be a per-tenant config.
+- **Resolves at:** when a tenant has a fixed tool stack.
