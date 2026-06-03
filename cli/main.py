@@ -761,6 +761,65 @@ def _cmd_notion_sync(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_n8n_plan(args: argparse.Namespace, *, out) -> int:
+    """Build the n8n execution dry-run payload (MKT-5C).
+
+    DRY RUN ONLY. No HTTP call, no webhook URL read, no message sent.
+
+    Exit codes:
+    - 0 on success
+    - 2 when no CampaignRunSummary is found for the client (every
+      other upstream artifact is optional).
+    """
+    from core.memory import EntityNotFound, JsonFileMemory
+    from core.n8n_sync import (
+        N8nPayloadPlanner,
+        render_markdown_payload,
+    )
+    from core.pipeline import PIPELINE_RUN_KIND, PIPELINE_RUN_SINGLETON
+
+    memory = JsonFileMemory(Path(args.root))
+
+    try:
+        memory.get(args.client, PIPELINE_RUN_KIND, PIPELINE_RUN_SINGLETON)
+    except EntityNotFound:
+        print(
+            f"error: no CampaignRunSummary for client {args.client!r}; run "
+            "`mkt run-campaign` first.",
+            file=out,
+        )
+        return 2
+
+    planner = N8nPayloadPlanner(memory=memory)
+    payload = planner.plan(args.client)
+    planner.persist(payload)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "n8n-execution-plan.md"
+    md_path.write_text(render_markdown_payload(payload), encoding="utf-8")
+    json_path = outputs_dir / "n8n-execution-payload.json"
+    json_path.write_text(payload.to_json(indent=2), encoding="utf-8")
+
+    summary = {
+        "payload_id": payload.payload_id,
+        "client_slug": payload.client_slug,
+        "contract_version": payload.contract_version,
+        "blocks_publish": payload.blocks_publish,
+        "stats": {
+            "total_actions": payload.stats.total_actions,
+            "planned": payload.stats.planned,
+            "blocked": payload.stats.blocked,
+            "by_type": payload.stats.by_type,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": payload.rule_set_id,
+    }
+    print(json.dumps(summary, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1251,6 +1310,28 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_ns.set_defaults(func=_cmd_notion_sync)
+
+    # n8n-plan (MKT-5C)
+    p_n8 = subs.add_parser(
+        "n8n-plan",
+        help=(
+            "build the n8n execution DRY-RUN payload from the persisted "
+            "campaign + creative + visual + notion-sync artifacts. Does NOT "
+            "call n8n, does NOT read webhook URLs, does NOT send anything."
+        ),
+    )
+    p_n8.add_argument("--client", required=True, help="client slug")
+    p_n8.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_n8.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where n8n-execution-{plan.md,payload.json} are written",
+    )
+    p_n8.set_defaults(func=_cmd_n8n_plan)
 
     # intake
     p_in = subs.add_parser(

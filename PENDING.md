@@ -1035,3 +1035,44 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-5B
 - **Why deferred:** Events are wrapped in `note` with `payload.notion_sync.{action, ...}`. Same trade-off as every previous block.
 - **Resolves at:** bundled with the next audit-trail bump.
+
+---
+
+## From MKT-5C (n8n execution payload dry-run)
+
+### P-5C.1 — Real n8n sync block (write path)
+- **Introduced:** MKT-5C
+- **Why deferred:** Out of scope here. MKT-5C ships data-only payloads. A future block would consume the persisted `N8nExecutionPayload` and POST each action to its webhook behind an opt-in `--push-to-n8n --confirm` flag, with the same gates as MKT-5B (`notion-sync --write --confirm`).
+- **Resolves at:** future block; explicitly out of scope here.
+- **Sketch:** new `core/n8n_sync/sender.py` with `N8nWebhookSender` ABC + `RefusingN8nSender` (default) + `HttpN8nSender` (lazy-imports `httpx`, behind `[notion-extras]` style optional dep `n8n`). CLI flag `--push-to-n8n --confirm`. Env vars `N8N_WEBHOOK_BASE_URL` + per-action overrides.
+
+### P-5C.2 — Per-tenant webhook URL mapping
+- **Introduced:** MKT-5C
+- **Why deferred:** A multi-tenant deployment needs per-client webhook URLs (different agencies → different n8n workspaces or different routing).
+- **Resolves at:** when multi-tenant deployment is real.
+- **Sketch:** `data/clients/<slug>/n8n.json` carries per-action webhook URL overrides. The future sender resolves logical names → URLs through this config.
+
+### P-5C.3 — Channel/tool selection hints in email + social payloads
+- **Introduced:** MKT-5C
+- **Why deferred:** Today the payload says "email_draft" without picking Mailchimp vs Resend; "social_post_draft" without picking Buffer vs Later. A future block can surface the operator's tool choice in the intake / brand config and propagate it.
+- **Resolves at:** when a tenant has a fixed tool stack.
+
+### P-5C.4 — Action subtypes for `telegram_notification`
+- **Introduced:** MKT-5C
+- **Why deferred:** Today there's one Telegram notification per campaign (a summary). Real ops needs more: alert when blocked, reminder when stalled, summary when completed. Could be modelled as `subtype` field on the action.
+- **Resolves at:** when ops asks for it.
+
+### P-5C.5 — Drive folder permissions hint
+- **Introduced:** MKT-5C
+- **Why deferred:** `drive_asset_folder` payload carries `share_with_role`. A real implementation needs concrete email/group ids, which live in tenant config.
+- **Resolves at:** with P-5C.2.
+
+### P-5C.6 — Action-level dispatch tracking
+- **Introduced:** MKT-5C
+- **Why deferred:** The model has `dispatched` + `failed` status values reserved but never emitted by the dry-run. They'll be set by the future real-sync block (P-5C.1) to record what n8n actually accepted vs rejected. Idempotency map will mirror MKT-5B's `synced_pages_index`.
+- **Resolves at:** with P-5C.1.
+
+### P-5C.7 — Promote audit payload to `audit-trail.v2`
+- **Introduced:** MKT-5C
+- **Why deferred:** Events are wrapped in `note` with `payload.n8n_execution_payload.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
