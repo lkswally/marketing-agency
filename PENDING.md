@@ -1076,3 +1076,61 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-5C
 - **Why deferred:** Events are wrapped in `note` with `payload.n8n_execution_payload.{action, ...}`. Same trade-off as every previous block.
 - **Resolves at:** bundled with the next audit-trail bump.
+
+---
+
+## From MKT-6A (manual marketing analytics import)
+
+### P-6A.1 — Real GA4 API import block
+- **Introduced:** MKT-6A
+- **Why deferred:** Out of scope here. Future block would consume Google's `google-analytics-data` SDK behind an opt-in `[ga4]` extra, with credential resolution from a service account JSON env var. Same pattern as MKT-4B (Anthropic) and MKT-5B (Notion).
+- **Resolves at:** future block.
+- **Sketch:** new `core/analytics/sources/ga4_real.py` with `GA4Importer(client_factory=...)`. Tests with mocked client; CI never hits GA4.
+
+### P-6A.2 — Real Search Console API import block
+- **Introduced:** MKT-6A
+- **Why deferred:** Same pattern as P-6A.1. Different SDK (`google-api-python-client`).
+- **Resolves at:** future block.
+
+### P-6A.3 — Multiple snapshots per client (time-ranged)
+- **Introduced:** MKT-6A
+- **Why deferred:** Today the snapshot is one append-only blob. Comparing "last week" vs "week before" needs separate snapshots keyed by time range.
+- **Resolves at:** when comparison analysis is needed.
+- **Sketch:** snapshot id includes a date range tag; analyzer accepts `--since/--until` flags.
+
+### P-6A.4 — Tunable thresholds via per-tenant config
+- **Introduced:** MKT-6A
+- **Why deferred:** `_SEO_LOW_CTR`, `_PAUSE_MIN_IMPRESSIONS`, etc. are module constants. A tenant with very different volumes (niche B2B vs viral consumer) may need different cutoffs.
+- **Resolves at:** when a tenant complains about a recommendation.
+- **Sketch:** `data/clients/<slug>/analytics.json` overrides; analyzer falls back to constants when absent.
+
+### P-6A.5 — LLM-enriched rationale for recommendations
+- **Introduced:** MKT-6A
+- **Why deferred:** The analyzer's rationale text is templated. LLM enrichment could turn it into a richer human-readable explanation, behind an opt-in flag (`--rationale claude`).
+- **Resolves at:** future block.
+- **Sketch:** reuse MKT-4B's `ClaudeInvoker` ABC. Default RefusingInvoker; fallback to templated rationale.
+
+### P-6A.6 — Snapshot delta analysis
+- **Introduced:** MKT-6A
+- **Why deferred:** Compare two snapshots / two time ranges and produce a delta recommendation pack (engagement up 30%, paid_search ROI down, etc.). Requires P-6A.3 first.
+- **Resolves at:** with P-6A.3.
+
+### P-6A.7 — Cross-link recommendations to strategy report
+- **Introduced:** MKT-6A
+- **Why deferred:** A recommendation like "pause paid_search" could link back to the specific channel rec in `CampaignStrategyReport`. The analyzer would need to load the report (optional) and produce structured "revise this section" hints.
+- **Resolves at:** when an operator asks for closed-loop feedback into the strategy.
+
+### P-6A.8 — Audit payload bump to `audit-trail.v2`
+- **Introduced:** MKT-6A
+- **Why deferred:** Events are wrapped in `note` with `payload.analytics_import.{action, ...}` and `payload.analytics_analysis.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-6A.9 — Deduplication on re-import
+- **Introduced:** MKT-6A
+- **Why deferred:** Re-importing the same file doubles the rows. A future revision could detect duplicate rows (same source + date + content_ref + metric_name) and skip them.
+- **Resolves at:** when an operator reports inflated counts.
+
+### P-6A.10 — Per-metric date range in the report
+- **Introduced:** MKT-6A
+- **Why deferred:** The recommendation pack doesn't surface the date range of the underlying data. A tenant reading the pack months later may not know which weeks the analysis covered.
+- **Resolves at:** when the snapshot stops being append-only (P-6A.3).

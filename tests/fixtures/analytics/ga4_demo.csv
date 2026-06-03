@@ -1,0 +1,6 @@
+date,channel,page,sessions,users,conversions,bounce_rate
+2026-05-01,organic_search,/blog/intro,420,310,12,0.42
+2026-05-02,organic_search,/blog/intro,380,280,10,0.45
+2026-05-03,paid_search,/landing/promo,150,140,2,0.71
+2026-05-04,paid_search,/landing/promo,100,95,1,0.78
+2026-05-05,newsletter,/blog/intro,90,60,8,0.30

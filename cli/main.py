@@ -820,6 +820,119 @@ def _cmd_n8n_plan(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
+    """Import a CSV/JSON file of metrics (MKT-6A).
+
+    Source must be one of: ga4, search_console, social, email, manual.
+
+    Exit codes:
+    - 0 on success (even with rejected rows; check the report)
+    - 2 when the file is missing / unparseable
+    """
+    from core.analytics import (
+        AnalyticsImporter,
+        ImporterError,
+        MetricSource,
+        render_markdown_import_report,
+    )
+    from core.memory import JsonFileMemory
+
+    file_path = Path(args.file)
+    if not file_path.exists():
+        print(f"error: file not found: {file_path}", file=out)
+        return 2
+
+    try:
+        source = MetricSource(args.source)
+    except ValueError:
+        print(
+            f"error: invalid source {args.source!r}; expected one of "
+            f"{', '.join(s.value for s in MetricSource)}.",
+            file=out,
+        )
+        return 2
+
+    memory = JsonFileMemory(Path(args.root))
+    importer = AnalyticsImporter(memory=memory)
+    try:
+        report, snapshot = importer.import_file(
+            client_slug=args.client, source=source, file_path=file_path
+        )
+    except ImporterError as e:
+        print(f"error: {e}", file=out)
+        return 2
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "analytics-import-report.md"
+    md_path.write_text(render_markdown_import_report(report), encoding="utf-8")
+    json_path = outputs_dir / "analytics-import-report.json"
+    json_path.write_text(report.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "import_id": report.import_id,
+        "client_slug": report.client_slug,
+        "source": report.source.value,
+        "file_path": report.file_path,
+        "rows_imported": report.rows_imported,
+        "rows_rejected": report.rows_rejected,
+        "snapshot_id": snapshot.snapshot_id,
+        "snapshot_total_rows": snapshot.total_rows,
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_analyze_metrics(args: argparse.Namespace, *, out) -> int:
+    """Analyze the persisted MetricsSnapshot and emit a recommendation pack.
+
+    Exit codes:
+    - 0 on success
+    - 2 when there is no MetricsSnapshot for the client (run
+      `mkt import-metrics` at least once first)
+    """
+    from core.analytics import (
+        AnalyticsAnalyzer,
+        render_markdown_recommendations,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    analyzer = AnalyticsAnalyzer(memory=memory)
+    try:
+        pack = analyzer.analyze(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    analyzer.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "analytics-recommendations.md"
+    md_path.write_text(render_markdown_recommendations(pack), encoding="utf-8")
+    json_path = outputs_dir / "analytics-recommendations.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "snapshot_id": pack.snapshot_id,
+        "total_rows_analyzed": pack.total_rows_analyzed,
+        "best_channel": pack.best_channel,
+        "worst_channel": pack.worst_channel,
+        "channels": [c.channel for c in pack.channels],
+        "seo_opportunities": len(pack.seo_opportunities.opportunities),
+        "recommendations": len(pack.recommendations),
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1332,6 +1445,56 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where n8n-execution-{plan.md,payload.json} are written",
     )
     p_n8.set_defaults(func=_cmd_n8n_plan)
+
+    # import-metrics (MKT-6A)
+    p_im = subs.add_parser(
+        "import-metrics",
+        help=(
+            "import a CSV/JSON metrics export for one client. "
+            "MANUAL ONLY — no API call, no credential read."
+        ),
+    )
+    p_im.add_argument("--client", required=True, help="client slug")
+    p_im.add_argument("--file", required=True, help="path to a .csv or .json file")
+    p_im.add_argument(
+        "--source",
+        required=True,
+        choices=("ga4", "search_console", "social", "email", "manual"),
+        help="data source the file was exported from",
+    )
+    p_im.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_im.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the import report MD/JSON are written",
+    )
+    p_im.set_defaults(func=_cmd_import_metrics)
+
+    # analyze-metrics (MKT-6A)
+    p_am = subs.add_parser(
+        "analyze-metrics",
+        help=(
+            "analyze the persisted metrics snapshot and emit a "
+            "deterministic OptimizationRecommendationPack. "
+            "No external API, no LLM."
+        ),
+    )
+    p_am.add_argument("--client", required=True, help="client slug")
+    p_am.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_am.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the recommendation MD/JSON are written",
+    )
+    p_am.set_defaults(func=_cmd_analyze_metrics)
 
     # intake
     p_in = subs.add_parser(
