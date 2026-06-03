@@ -933,6 +933,61 @@ def _cmd_analyze_metrics(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_feedback_plan(args: argparse.Namespace, *, out) -> int:
+    """Build the campaign feedback pack (MKT-6B) from analytics
+    recommendations + the rest of the persisted campaign artifacts.
+
+    Exit codes:
+    - 0 on success
+    - 2 when there is no OptimizationRecommendationPack for the client
+      (run `mkt analyze-metrics` first)
+    """
+    from core.feedback import (
+        FeedbackPlanner,
+        render_markdown_feedback,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    planner = FeedbackPlanner(memory=memory)
+    try:
+        pack = planner.plan(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    planner.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "campaign-feedback-pack.md"
+    md_path.write_text(render_markdown_feedback(pack), encoding="utf-8")
+    json_path = outputs_dir / "campaign-feedback-pack.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "recommendation_pack_id": pack.recommendation_pack_id,
+        "snapshot_id": pack.snapshot_id,
+        "stats": {
+            "total_items": pack.total_items,
+            "high_priority_tasks": pack.stats.high_priority_tasks,
+            "total_suggested_tasks": pack.stats.total_suggested_tasks,
+            "channel_adjustments": pack.stats.channel_adjustments,
+            "content_suggestions": pack.stats.content_suggestions,
+            "seo_recommendations": pack.stats.seo_recommendations,
+            "email_recommendations": pack.stats.email_recommendations,
+            "social_recommendations": pack.stats.social_recommendations,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1495,6 +1550,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the recommendation MD/JSON are written",
     )
     p_am.set_defaults(func=_cmd_analyze_metrics)
+
+    # feedback-plan (MKT-6B)
+    p_fp = subs.add_parser(
+        "feedback-plan",
+        help=(
+            "build the CampaignFeedbackPack from the persisted analytics "
+            "recommendation pack + the rest of the campaign artifacts. "
+            "Deterministic, LLM-free, no external API. Suggestions only."
+        ),
+    )
+    p_fp.add_argument("--client", required=True, help="client slug")
+    p_fp.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_fp.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the feedback pack MD/JSON are written",
+    )
+    p_fp.set_defaults(func=_cmd_feedback_plan)
 
     # intake
     p_in = subs.add_parser(

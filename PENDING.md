@@ -1134,3 +1134,38 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6A
 - **Why deferred:** The recommendation pack doesn't surface the date range of the underlying data. A tenant reading the pack months later may not know which weeks the analysis covered.
 - **Resolves at:** when the snapshot stops being append-only (P-6A.3).
+
+---
+
+## From MKT-6B (campaign feedback loop)
+
+### P-6B.1 — Auto-promote suggested tasks into the next ExecutionTaskPack
+- **Introduced:** MKT-6B
+- **Why deferred:** The pack's `SuggestedTask` shape matches `ExecutionTask`. A future block can promote them on the next `mkt build-tasks` invocation behind an opt-in `--apply-feedback` flag.
+- **Resolves at:** when the operator runs two campaigns in a row and asks for it.
+- **Sketch:** new flag on `build-tasks`. Reads the latest `campaign_feedback_pack`, converts `SuggestedTask` instances to `ExecutionTask` (priority, category, channel, evidence_refs all transfer cleanly), prepends them to the next pack with `state=todo`.
+
+### P-6B.2 — LLM-enriched executive summary
+- **Introduced:** MKT-6B
+- **Why deferred:** Today the summary is templated and short. LLM enrichment via the MKT-4B Claude invoker (`--summary claude` flag) could produce richer client-facing prose. Default stays templated.
+- **Resolves at:** future block.
+
+### P-6B.3 — Multi-period comparison
+- **Introduced:** MKT-6B
+- **Why deferred:** Compare this cycle's feedback pack with the previous one and surface deltas ("paid_search dropped 30% vs last cycle"). Requires P-6A.3 (time-ranged snapshots).
+- **Resolves at:** with P-6A.3.
+
+### P-6B.4 — Strategy report mutation hints
+- **Introduced:** MKT-6B
+- **Why deferred:** The planner observes "pause x" but does not propose an explicit diff to `CampaignStrategyReport.channel_recommendation`. A future block could emit a per-section diff that a copywriter applies to the next strategy run.
+- **Resolves at:** when the operator wants to close the loop end-to-end.
+
+### P-6B.5 — Per-tenant channel-priority thresholds
+- **Introduced:** MKT-6B
+- **Why deferred:** `_EMAIL_LOW_OPEN_RATE`, `_SOCIAL_MIN_IMPRESSIONS`, etc. are module constants. Mirrors P-6A.4; would land via the same per-tenant config file.
+- **Resolves at:** with P-6A.4.
+
+### P-6B.6 — Audit-trail bump to `audit-trail.v2`
+- **Introduced:** MKT-6B
+- **Why deferred:** Events are wrapped in `note` with `payload.campaign_feedback_pack.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
