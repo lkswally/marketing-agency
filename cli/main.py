@@ -988,6 +988,66 @@ def _cmd_feedback_plan(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_apply_feedback(args: argparse.Namespace, *, out) -> int:
+    """Build the next-campaign iteration plan (MKT-6C) from the
+    persisted CampaignFeedbackPack + the rest of the campaign
+    artifacts.
+
+    DOES NOT apply changes to any existing pack. Suggestions only.
+
+    Exit codes:
+    - 0 on success
+    - 2 when there is no CampaignFeedbackPack for the client
+      (run `mkt feedback-plan` first)
+    """
+    from core.iteration import (
+        IterationPlanner,
+        render_markdown_iteration_plan,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    planner = IterationPlanner(memory=memory)
+    try:
+        plan = planner.plan(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    planner.persist(plan)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "next-campaign-iteration-plan.md"
+    md_path.write_text(render_markdown_iteration_plan(plan), encoding="utf-8")
+    json_path = outputs_dir / "next-campaign-iteration-plan.json"
+    json_path.write_text(plan.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "plan_id": plan.plan_id,
+        "client_slug": plan.client_slug,
+        "contract_version": plan.contract_version,
+        "feedback_pack_id": plan.feedback_pack_id,
+        "stats": {
+            "total_items": plan.total_items,
+            "total_actions": plan.stats.total_actions,
+            "repeats": plan.stats.repeats,
+            "pauses": plan.stats.pauses,
+            "improves": plan.stats.improves,
+            "creates": plan.stats.creates,
+            "channel_adjustments": plan.stats.channel_adjustments,
+            "new_content_ideas": plan.stats.new_content_ideas,
+            "ab_test_hypotheses": plan.stats.ab_test_hypotheses,
+            "calendar_entries": plan.stats.calendar_entries,
+            "suggested_tasks": plan.stats.suggested_tasks,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": plan.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1572,6 +1632,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the feedback pack MD/JSON are written",
     )
     p_fp.set_defaults(func=_cmd_feedback_plan)
+
+    # apply-feedback (MKT-6C)
+    p_af = subs.add_parser(
+        "apply-feedback",
+        help=(
+            "build the NextCampaignIterationPlan from the persisted "
+            "CampaignFeedbackPack. Deterministic, LLM-free, no external "
+            "API. The plan never applies changes — suggestions only."
+        ),
+    )
+    p_af.add_argument("--client", required=True, help="client slug")
+    p_af.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_af.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the iteration plan MD/JSON are written",
+    )
+    p_af.set_defaults(func=_cmd_apply_feedback)
 
     # intake
     p_in = subs.add_parser(

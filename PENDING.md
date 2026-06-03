@@ -1169,3 +1169,43 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6B
 - **Why deferred:** Events are wrapped in `note` with `payload.campaign_feedback_pack.{action, ...}`. Same trade-off as every previous block.
 - **Resolves at:** bundled with the next audit-trail bump.
+
+---
+
+## From MKT-6C (feedback apply / next campaign iteration plan)
+
+### P-6C.1 — Promote `SuggestedIterationTask` into the next `CampaignExecutionTaskPack`
+- **Introduced:** MKT-6C
+- **Why deferred:** Shape mirrors `ExecutionTask` deliberately so promotion is trivial — but invoking it must stay opt-in. The CLI today never mutates upstream packs.
+- **Resolves at:** future block adding `mkt build-tasks --apply-iteration-plan` (or similar).
+- **Sketch:** read the latest `next_campaign_iteration_plan`, map each `SuggestedIterationTask` to an `ExecutionTask` (priority/category/channel transfer cleanly), prepend to the next pack with `state=todo`, emit audit event.
+
+### P-6C.2 — LLM-enriched executive summary
+- **Introduced:** MKT-6C
+- **Why deferred:** Default templated summary stays; an opt-in flag would route through the MKT-4B Claude invoker for richer prose.
+- **Resolves at:** future block.
+
+### P-6C.3 — Populate `create_new` iteration actions
+- **Introduced:** MKT-6C
+- **Why deferred:** `IterationActionKind.CREATE_NEW` is reserved but never emitted today; the structured `NewContentIdea` section covers the intent. A revision can emit `create_new` actions when a recommendation explicitly says "create".
+- **Resolves at:** when a feedback pack surfaces explicit "create new" suggestions.
+
+### P-6C.4 — Calendar diff vs previous cycle
+- **Introduced:** MKT-6C
+- **Why deferred:** Surface week-by-week shifts ("blog moved from week 1 to week 3") against the previous iteration plan. Requires historical iteration plans or P-6A.3's time-ranged snapshots.
+- **Resolves at:** with P-6A.3.
+
+### P-6C.5 — Strategy report mutation hints
+- **Introduced:** MKT-6C
+- **Why deferred:** Iteration plan says "channel promote x" but does not propose a structured diff against `CampaignStrategyReport.channel_recommendation`. Mirrors P-6B.4 from the iteration-plan side.
+- **Resolves at:** with P-6B.4.
+
+### P-6C.6 — Audit-trail bump to `audit-trail.v2`
+- **Introduced:** MKT-6C
+- **Why deferred:** Events are wrapped in `note` with `payload.next_campaign_iteration_plan.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-6C.7 — Funnel-stage hints in the calendar
+- **Introduced:** MKT-6C
+- **Why deferred:** Calendar entries do not differentiate "weeks 1-2 = awareness/launch" vs "weeks 3-4 = nurture/conversion". A revision can carry `funnel_stage` per entry to align with the strategy report's narrative arc.
+- **Resolves at:** when an operator asks for explicit funnel sequencing.
