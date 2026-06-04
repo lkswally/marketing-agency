@@ -1339,3 +1339,47 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6F
 - **Why deferred:** The analyzer sees one snapshot. Comparing this cycle's insights against the previous cycle's pack would surface deltas ("CPA on Brand campaign was median × 1.2, now median × 2.5"). Requires P-6A.3 time-ranged snapshots.
 - **Resolves at:** with P-6A.3.
+
+---
+
+## From MKT-6G (Ads insights to feedback loop integration)
+
+### P-6G.1 — Opt-in promotion of `AdsSuggestedTask` into `CampaignFeedbackPack`
+- **Introduced:** MKT-6G
+- **Why deferred:** Shape mirrors MKT-6B `SuggestedTask` deliberately so promotion is trivial — but invoking it must stay opt-in (user's "no automatic mutation" rule). Add `mkt feedback-plan --include-ads-bridge` to fold them in.
+- **Resolves at:** future block.
+
+### P-6G.2 — Opt-in promotion into `CampaignExecutionTaskPack`
+- **Introduced:** MKT-6G
+- **Why deferred:** Same shape as P-6G.1 but lifts into MKT-4E execution tasks. Opt-in via `mkt build-tasks --include-ads-bridge`.
+- **Resolves at:** future block.
+
+### P-6G.3 — Opt-in promotion into `NextCampaignIterationPlan`
+- **Introduced:** MKT-6G
+- **Why deferred:** `AdsAdjustmentKind.PAUSE_REVIEW` / `SCALE_REVIEW` map cleanly to MKT-6C `IterationAction` kinds. Opt-in via `mkt apply-feedback --include-ads-bridge`.
+- **Resolves at:** future block.
+
+### P-6G.4 — Real negative-keyword candidate extraction
+- **Introduced:** MKT-6G
+- **Why deferred:** The bridge has the wiring for `AdsKeywordProposal` but the source data (search-term-level rows) needs P-6E.1 (connector query) and P-6F.2 (analyzer rule). Once both land, the bridge will emit real candidates with zero code change here.
+- **Resolves at:** with P-6E.1 + P-6F.2.
+
+### P-6G.5 — Cross-channel comparison (Ads vs GA4 / Search Console)
+- **Introduced:** MKT-6G
+- **Why deferred:** A high-priority bridge pack could include "Brand keyword: paid CPA $25, organic CTR 8% on same query" comparisons. Requires search-term-level data in both connectors.
+- **Resolves at:** future block once search-term data is reliable.
+
+### P-6G.6 — LLM-enriched rationale
+- **Introduced:** MKT-6G
+- **Why deferred:** Today rationales are templated. Opt-in flag could route through MKT-4B Claude invoker for richer client-facing prose.
+- **Resolves at:** future block.
+
+### P-6G.7 — Native `ads_feedback_bridge_pack.v1` audit envelope
+- **Introduced:** MKT-6G
+- **Why deferred:** Events wrapped in `note` with `payload.ads_feedback_bridge_pack.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-6G.8 — Multi-period delta vs previous bridge pack
+- **Introduced:** MKT-6G
+- **Why deferred:** Compare this cycle's bridge pack against the previous one ("3 new pause candidates this cycle, 2 carried over"). Requires historical bridge packs or P-6A.3 time-ranged snapshots.
+- **Resolves at:** with P-6A.3.

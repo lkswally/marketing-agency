@@ -1171,6 +1171,66 @@ def _cmd_ads_analyze(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_ads_feedback(args: argparse.Namespace, *, out) -> int:
+    """Bridge the Google Ads insight pack into the feedback loop
+    (MKT-6G).
+
+    Reads a persisted ``GoogleAdsInsightPack``, turns each insight
+    into recommendations, campaign adjustments, keyword proposals
+    and suggested tasks, and persists an ``AdsFeedbackBridgePack``.
+
+    Exit codes:
+    - 0 on success.
+    - 2 when there is no ``GoogleAdsInsightPack`` for the client.
+    """
+
+    from core.ads_feedback import (
+        AdsFeedbackBridge,
+        render_markdown_ads_bridge,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    bridge = AdsFeedbackBridge(memory=memory)
+    try:
+        pack = bridge.build(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    bridge.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "ads-feedback-bridge-pack.md"
+    md_path.write_text(render_markdown_ads_bridge(pack), encoding="utf-8")
+    json_path = outputs_dir / "ads-feedback-bridge-pack.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "insight_pack_id": pack.insight_pack_id,
+        "feedback_pack_id": pack.feedback_pack_id,
+        "execution_task_pack_id": pack.execution_task_pack_id,
+        "iteration_plan_id": pack.iteration_plan_id,
+        "stats": {
+            "total_recommendations": pack.stats.total_recommendations,
+            "total_campaign_adjustments": pack.stats.total_campaign_adjustments,
+            "total_keyword_proposals": pack.stats.total_keyword_proposals,
+            "total_suggested_tasks": pack.stats.total_suggested_tasks,
+            "by_recommendation_kind": pack.stats.by_recommendation_kind,
+            "by_recommendation_priority": pack.stats.by_recommendation_priority,
+            "by_adjustment_kind": pack.stats.by_adjustment_kind,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1842,6 +1902,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the insight pack MD/JSON are written",
     )
     p_ads.set_defaults(func=_cmd_ads_analyze)
+
+    # ads-feedback (MKT-6G)
+    p_adsfb = subs.add_parser(
+        "ads-feedback",
+        help=(
+            "bridge the persisted GoogleAdsInsightPack into the feedback "
+            "loop. Read-only — no campaign / keyword / budget mutation, "
+            "suggestions only."
+        ),
+    )
+    p_adsfb.add_argument("--client", required=True, help="client slug")
+    p_adsfb.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_adsfb.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the bridge pack MD/JSON are written",
+    )
+    p_adsfb.set_defaults(func=_cmd_ads_feedback)
 
     # intake
     p_in = subs.add_parser(
