@@ -1344,20 +1344,17 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 
 ## From MKT-6G (Ads insights to feedback loop integration)
 
-### P-6G.1 — Opt-in promotion of `AdsSuggestedTask` into `CampaignFeedbackPack`
+### P-6G.1 — Opt-in promotion of `AdsSuggestedTask` into `CampaignFeedbackPack`  ✅ RESOLVED in MKT-6H
 - **Introduced:** MKT-6G
-- **Why deferred:** Shape mirrors MKT-6B `SuggestedTask` deliberately so promotion is trivial — but invoking it must stay opt-in (user's "no automatic mutation" rule). Add `mkt feedback-plan --include-ads-bridge` to fold them in.
-- **Resolves at:** future block.
+- **Resolved at:** MKT-6H — `mkt feedback-plan --include-ads-bridge` via `core/ads_promoter/`.
 
-### P-6G.2 — Opt-in promotion into `CampaignExecutionTaskPack`
+### P-6G.2 — Opt-in promotion into `CampaignExecutionTaskPack`  ✅ RESOLVED in MKT-6H
 - **Introduced:** MKT-6G
-- **Why deferred:** Same shape as P-6G.1 but lifts into MKT-4E execution tasks. Opt-in via `mkt build-tasks --include-ads-bridge`.
-- **Resolves at:** future block.
+- **Resolved at:** MKT-6H — `mkt build-tasks --include-ads-bridge`.
 
-### P-6G.3 — Opt-in promotion into `NextCampaignIterationPlan`
+### P-6G.3 — Opt-in promotion into `NextCampaignIterationPlan`  ✅ RESOLVED in MKT-6H
 - **Introduced:** MKT-6G
-- **Why deferred:** `AdsAdjustmentKind.PAUSE_REVIEW` / `SCALE_REVIEW` map cleanly to MKT-6C `IterationAction` kinds. Opt-in via `mkt apply-feedback --include-ads-bridge`.
-- **Resolves at:** future block.
+- **Resolved at:** MKT-6H — `mkt apply-feedback --include-ads-bridge`.
 
 ### P-6G.4 — Real negative-keyword candidate extraction
 - **Introduced:** MKT-6G
@@ -1383,3 +1380,37 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6G
 - **Why deferred:** Compare this cycle's bridge pack against the previous one ("3 new pause candidates this cycle, 2 carried over"). Requires historical bridge packs or P-6A.3 time-ranged snapshots.
 - **Resolves at:** with P-6A.3.
+
+---
+
+## From MKT-6H (ads bridge promoter opt-in)
+
+### P-6H.1 — Promote `AdsKeywordProposal` entries into the feedback pack
+- **Introduced:** MKT-6H
+- **Why deferred:** Today the bridge emits zero proposals (no search-term data). Once P-6E.1 lands, proposals will be real and worth promoting — likely as `SuggestedTask` entries with category `operational` plus a sentinel marker.
+- **Resolves at:** with P-6E.1.
+
+### P-6H.2 — Filter / select subset of recommendations to promote
+- **Introduced:** MKT-6H
+- **Why deferred:** Today `--include-ads-bridge` is all-or-nothing. A future flag could narrow to high-priority only (`--include-ads-bridge=high`) or to specific kinds (`--include-ads-bridge=pause_review,scale_opportunity`).
+- **Resolves at:** when operators hit promotion volume that needs trimming.
+
+### P-6H.3 — Dry-run preview of what would be promoted
+- **Introduced:** MKT-6H
+- **Why deferred:** `--include-ads-bridge --dry-run` could print the proposed promotions + counts without persisting. Useful when the bridge pack has many high-priority items.
+- **Resolves at:** future block.
+
+### P-6H.4 — Promote into `ExecutionTask.depends_on` graph
+- **Introduced:** MKT-6H
+- **Why deferred:** Today promoted execution tasks are standalone. A future version could link them to the underlying campaign tasks via `depends_on` so the kanban respects dependencies.
+- **Resolves at:** when operators ask for graph-aware promotion.
+
+### P-6H.5 — Native `ads_bridge_promotion.v1` audit envelope
+- **Introduced:** MKT-6H
+- **Why deferred:** Events wrapped in `note` with `payload.ads_bridge_promotion.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-6H.6 — Multi-source promotion
+- **Introduced:** MKT-6H
+- **Why deferred:** Today the promoter handles only `AdsFeedbackBridgePack`. If additional source bridges land (e.g. an organic-search bridge), the flag could become a multi-value list or split into one flag per source.
+- **Resolves at:** when a second bridge source is introduced.

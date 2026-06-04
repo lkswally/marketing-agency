@@ -492,6 +492,21 @@ def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
 
     factory = TaskFactory(memory=memory)
     pack = factory.build(report, approval, creative, visual)
+
+    # MKT-6H opt-in: promote AdsFeedbackBridgePack tasks into the
+    # execution pack. Without the flag, behaviour is unchanged.
+    if getattr(args, "include_ads_bridge", False):
+        bridge = _load_ads_bridge_pack_or_none(memory, args.client)
+        if bridge is not None:
+            from core.ads_promoter import promote_into_execution_tasks
+            result = promote_into_execution_tasks(bridge, pack)
+            _audit_ads_promotion(
+                memory, client_slug=args.client,
+                target="campaign_execution_task_pack",
+                bridge_pack_id=bridge.pack_id,
+                promotion_result=result,
+            )
+
     factory.persist(pack)
 
     outputs_dir = Path(args.outputs_dir)
@@ -933,9 +948,81 @@ def _cmd_analyze_metrics(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _load_ads_bridge_pack_or_none(memory, client_slug: str):
+    """Load the persisted ``AdsFeedbackBridgePack`` for ``client_slug``
+    or return ``None`` when it does not exist. Used by the three
+    ``--include-ads-bridge`` opt-in promotion flows (MKT-6H)."""
+
+    from core.ads_feedback.models import (
+        ADS_FEEDBACK_BRIDGE_PACK_KIND,
+        AdsFeedbackBridgePack,
+    )
+    from core.ads_feedback.models import (
+        SINGLETON_ID as ADS_BRIDGE_SINGLETON,
+    )
+    from core.memory import EntityNotFound
+
+    try:
+        raw = memory.get(
+            client_slug, ADS_FEEDBACK_BRIDGE_PACK_KIND, ADS_BRIDGE_SINGLETON,
+        )
+    except EntityNotFound:
+        return None
+    return AdsFeedbackBridgePack.model_validate(raw)
+
+
+def _audit_ads_promotion(
+    memory, *, client_slug: str, target: str, bridge_pack_id: str,
+    promotion_result,
+) -> None:
+    """Append one audit event documenting a ``--include-ads-bridge``
+    promotion run (MKT-6H)."""
+
+    from core.contracts import AuditEventType, AuditTrailEvent
+    from core.domain.base import utcnow as _utcnow
+
+    prev = memory.last_audit_hash(client_slug)
+    event = AuditTrailEvent.build(
+        event_type=AuditEventType.NOTE,
+        actor="ads_bridge_promoter",
+        occurred_at=_utcnow(),
+        client_slug=client_slug,
+        payload={
+            "ads_bridge_promotion": {
+                "action": "promoted",
+                "target": target,
+                "bridge_pack_id": bridge_pack_id,
+                "recommendations_promoted": (
+                    promotion_result.recommendations_promoted
+                ),
+                "tasks_promoted": promotion_result.tasks_promoted,
+                "channel_adjustments_promoted": (
+                    promotion_result.channel_adjustments_promoted
+                ),
+                "content_suggestions_promoted": (
+                    promotion_result.content_suggestions_promoted
+                ),
+                "iteration_actions_promoted": (
+                    promotion_result.iteration_actions_promoted
+                ),
+                "duplicates_skipped": promotion_result.duplicates_skipped,
+            }
+        },
+        prev_hash=prev,
+    )
+    memory.append_audit_event(event)
+
+
 def _cmd_feedback_plan(args: argparse.Namespace, *, out) -> int:
     """Build the campaign feedback pack (MKT-6B) from analytics
     recommendations + the rest of the persisted campaign artifacts.
+
+    With ``--include-ads-bridge`` (MKT-6H), the persisted
+    :class:`AdsFeedbackBridgePack` is opt-in folded in: ads
+    recommendations become extra :class:`SuggestedTask` /
+    :class:`ContentSuggestion` entries, ads campaign adjustments
+    become extra ``google_ads`` :class:`ChannelAdjustment` entries.
+    Without the flag, behaviour is byte-compatible with pre-MKT-6H.
 
     Exit codes:
     - 0 on success
@@ -955,6 +1042,20 @@ def _cmd_feedback_plan(args: argparse.Namespace, *, out) -> int:
     except ValueError as e:
         print(f"error: {e}", file=out)
         return 2
+
+    promotion = None
+    if getattr(args, "include_ads_bridge", False):
+        bridge = _load_ads_bridge_pack_or_none(memory, args.client)
+        if bridge is not None:
+            from core.ads_promoter import promote_into_feedback_pack
+            promotion = promote_into_feedback_pack(bridge, pack)
+            _audit_ads_promotion(
+                memory, client_slug=args.client,
+                target="campaign_feedback_pack",
+                bridge_pack_id=bridge.pack_id,
+                promotion_result=promotion,
+            )
+
     planner.persist(pack)
 
     outputs_dir = Path(args.outputs_dir)
@@ -1013,6 +1114,22 @@ def _cmd_apply_feedback(args: argparse.Namespace, *, out) -> int:
     except ValueError as e:
         print(f"error: {e}", file=out)
         return 2
+
+    # MKT-6H opt-in: promote ads bridge campaign adjustments +
+    # suggested tasks into the iteration plan. Without the flag,
+    # behaviour is byte-compatible with pre-MKT-6H.
+    if getattr(args, "include_ads_bridge", False):
+        bridge = _load_ads_bridge_pack_or_none(memory, args.client)
+        if bridge is not None:
+            from core.ads_promoter import promote_into_iteration_plan
+            result = promote_into_iteration_plan(bridge, plan)
+            _audit_ads_promotion(
+                memory, client_slug=args.client,
+                target="next_campaign_iteration_plan",
+                bridge_pack_id=bridge.pack_id,
+                promotion_result=result,
+            )
+
     planner.persist(plan)
 
     outputs_dir = Path(args.outputs_dir)
@@ -1648,6 +1765,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outputs",
         help="directory for the Markdown + JSON + Notion-payload files (default: outputs/)",
     )
+    p_bt.add_argument(
+        "--include-ads-bridge",
+        action="store_true",
+        default=False,
+        help=(
+            "MKT-6H opt-in: fold the persisted AdsFeedbackBridgePack "
+            "recommendations into this task pack. Idempotent — re-runs "
+            "skip duplicates."
+        ),
+    )
     p_bt.set_defaults(func=_cmd_build_tasks)
 
     # notion-plan (MKT-5A)
@@ -1814,6 +1941,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outputs",
         help="directory where the feedback pack MD/JSON are written",
     )
+    p_fp.add_argument(
+        "--include-ads-bridge",
+        action="store_true",
+        default=False,
+        help=(
+            "MKT-6H opt-in: fold the persisted AdsFeedbackBridgePack "
+            "recommendations + adjustments into this feedback pack. "
+            "Idempotent — re-runs skip duplicates."
+        ),
+    )
     p_fp.set_defaults(func=_cmd_feedback_plan)
 
     # apply-feedback (MKT-6C)
@@ -1835,6 +1972,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--outputs-dir",
         default="outputs",
         help="directory where the iteration plan MD/JSON are written",
+    )
+    p_af.add_argument(
+        "--include-ads-bridge",
+        action="store_true",
+        default=False,
+        help=(
+            "MKT-6H opt-in: fold the persisted AdsFeedbackBridgePack "
+            "campaign adjustments + tasks into this iteration plan. "
+            "Idempotent — re-runs skip duplicates."
+        ),
     )
     p_af.set_defaults(func=_cmd_apply_feedback)
 
