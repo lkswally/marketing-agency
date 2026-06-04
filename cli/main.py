@@ -1348,6 +1348,66 @@ def _cmd_ads_feedback(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_image_jobs(args: argparse.Namespace, *, out) -> int:
+    """Build an ImageGenerationJobPack (MKT-7A) from the persisted
+    VisualDirectionPack + optional ApprovalPack / CreativeAssetPack /
+    CampaignRunSummary.
+
+    NO image is generated. NO provider is called. The block emits a
+    structured pack of jobs the operator reviews before any real
+    integration ships.
+
+    Exit codes:
+    - 0 on success
+    - 2 when there is no VisualDirectionPack for the client
+    """
+    from core.image_jobs import (
+        ImageJobFactory,
+        render_markdown_image_jobs,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    factory = ImageJobFactory(memory=memory)
+    try:
+        pack = factory.build(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    factory.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "image-generation-jobs.md"
+    md_path.write_text(render_markdown_image_jobs(pack), encoding="utf-8")
+    json_path = outputs_dir / "image-generation-jobs.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "visual_pack_id": pack.visual_pack_id,
+        "creative_pack_id": pack.creative_pack_id,
+        "approval_pack_id": pack.approval_pack_id,
+        "blocks_publish": pack.blocks_publish,
+        "stats": {
+            "total_jobs": pack.stats.total_jobs,
+            "directions_consumed": pack.stats.directions_consumed,
+            "blocked_due_to_approval": pack.stats.blocked_due_to_approval,
+            "blocked_due_to_direction": pack.stats.blocked_due_to_direction,
+            "by_state": pack.stats.by_state,
+            "by_provider_suggestion": pack.stats.by_provider_suggestion,
+            "by_piece_type": pack.stats.by_piece_type,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -2071,6 +2131,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the bridge pack MD/JSON are written",
     )
     p_adsfb.set_defaults(func=_cmd_ads_feedback)
+
+    # image-jobs (MKT-7A)
+    p_imgj = subs.add_parser(
+        "image-jobs",
+        help=(
+            "build an ImageGenerationJobPack from the persisted "
+            "VisualDirectionPack. No image is generated; no provider "
+            "is called — jobs are review-only deliverables."
+        ),
+    )
+    p_imgj.add_argument("--client", required=True, help="client slug")
+    p_imgj.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_imgj.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the image jobs MD/JSON are written",
+    )
+    p_imgj.set_defaults(func=_cmd_image_jobs)
 
     # intake
     p_in = subs.add_parser(

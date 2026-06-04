@@ -1414,3 +1414,47 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6H
 - **Why deferred:** Today the promoter handles only `AdsFeedbackBridgePack`. If additional source bridges land (e.g. an organic-search bridge), the flag could become a multi-value list or split into one flag per source.
 - **Resolves at:** when a second bridge source is introduced.
+
+---
+
+## From MKT-7A (image generation job pack)
+
+### P-7A.1 — Per-tenant provider heuristic override
+- **Introduced:** MKT-7A
+- **Why deferred:** Today `_PIECE_TYPE_TO_PROVIDER` is a module constant. Different tenants prefer different providers (cost / brand / agency template). A tenant-specific config file could override per-piece-type.
+- **Resolves at:** when an operator hits a tenant-baseline mismatch.
+
+### P-7A.2 — Per-job cost estimate
+- **Introduced:** MKT-7A
+- **Why deferred:** Cost is provider × dimensions × variants. Requires a static price table per provider and currency normalisation. Operator-facing surface needs design.
+- **Resolves at:** when integrated providers ship (with P-7A.6).
+
+### P-7A.3 — Reference image attachment (style transfer inputs)
+- **Introduced:** MKT-7A
+- **Why deferred:** Some providers accept a reference image (style transfer / IP-Adapter). Requires a model field for the source asset id + safety pin that the bridge does not embed binary data.
+- **Resolves at:** with the first integration block that supports reference inputs.
+
+### P-7A.4 — Multi-output jobs (one prompt → N renders)
+- **Introduced:** MKT-7A
+- **Why deferred:** Today one variant = one job. A future job could declare `n_outputs: int` with per-output review gates.
+- **Resolves at:** when operators ask for batched generation.
+
+### P-7A.5 — Job grouping by campaign / launch wave
+- **Introduced:** MKT-7A
+- **Why deferred:** Jobs are flat per pack today. Grouping (e.g. "Launch wave 1" / "Always-on") would help operators tackle them in batches in the Ads/CMS UI.
+- **Resolves at:** when a multi-wave campaign hits the agency.
+
+### P-7A.6 — Real provider integration with `generated` state + asset URI
+- **Introduced:** MKT-7A
+- **Why deferred:** The entire point of MKT-7A is to ship the job-pack contract WITHOUT touching any provider. A separate block (likely MKT-7B) will implement one or more provider adapters (read-write) with explicit opt-in flags, idempotence, audit envelopes and the `generated` state.
+- **Resolves at:** with MKT-7B.
+
+### P-7A.7 — Native `image_generation_job_pack.v1` audit envelope
+- **Introduced:** MKT-7A
+- **Why deferred:** Events wrapped in `note` with `payload.image_generation_job_pack.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-7A.8 — Promote `ready_for_generation` jobs into `CampaignExecutionTaskPack`
+- **Introduced:** MKT-7A
+- **Why deferred:** Mirrors the MKT-6H pattern. Opt-in flag on `mkt build-tasks --include-image-jobs` could fold each ready job into the operational task pack as a "generate image" task assigned to a designer / provider operator.
+- **Resolves at:** future block.
