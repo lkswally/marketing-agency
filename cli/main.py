@@ -1048,6 +1048,74 @@ def _cmd_apply_feedback(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_analytics_fetch(args: argparse.Namespace, *, out) -> int:
+    """Run a read-only analytics fetch (MKT-6D).
+
+    Pulls data from GA4 or Search Console via the official Google
+    SDK in read-only mode (``run_report`` / ``searchanalytics.query``
+    only), normalises the rows into :class:`MetricRow` and appends
+    them to the per-client :class:`MetricsSnapshot`.
+
+    Behaviour without credentials / SDK / ``--dry-run``: the
+    service emits a ``FetchStatus.SKIPPED`` report with a clear
+    reason, writes the report MD/JSON, registers an audit
+    ``fetch_skipped`` event and exits 0 (degraded, not an error).
+
+    Exit codes:
+    - 0 on success (including SKIPPED / FAILED — both are recorded,
+      not crashes).
+    - 2 when ``--source`` is missing / unsupported (argparse) or the
+      service raises a configuration ValueError.
+    """
+
+    from core.analytics.connectors import (
+        DEFAULT_LOOKBACK_DAYS,
+        AnalyticsFetchService,
+        resolve_connector,
+    )
+    from core.analytics.connectors.service import write_report_outputs
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    try:
+        connector = resolve_connector(args.source, dry_run=args.dry_run)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+
+    service = AnalyticsFetchService(
+        memory=memory,
+        connector=connector,
+        lookback_days=args.lookback_days or DEFAULT_LOOKBACK_DAYS,
+    )
+    report = service.run(client_slug=args.client)
+
+    outputs_dir = Path(args.outputs_dir)
+    md_path, json_path = write_report_outputs(report, outputs_dir=outputs_dir)
+
+    payload = {
+        "report_id": report.report_id,
+        "client_slug": report.client_slug,
+        "contract_version": report.contract_version,
+        "source": report.source,
+        "status": report.status.value,
+        "rows_fetched": report.rows_fetched,
+        "rows_normalized": report.rows_normalized,
+        "rows_rejected": report.rows_rejected,
+        "snapshot_id": report.snapshot_id,
+        "sdk_available": report.sdk_available,
+        "credentials_available": report.credentials_available,
+        "dry_run": report.dry_run,
+        "lookback_days": report.lookback_days,
+        "identifier_fingerprint": report.identifier_fingerprint,
+        "reason": report.reason,
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1654,6 +1722,49 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the iteration plan MD/JSON are written",
     )
     p_af.set_defaults(func=_cmd_apply_feedback)
+
+    # analytics-fetch (MKT-6D)
+    p_xfetch = subs.add_parser(
+        "analytics-fetch",
+        help=(
+            "fetch metrics from a read-only Google connector (GA4 or "
+            "Search Console). No mutation, no Google Ads, no MCP. "
+            "Skips gracefully without credentials."
+        ),
+    )
+    p_xfetch.add_argument("--client", required=True, help="client slug")
+    p_xfetch.add_argument(
+        "--source",
+        required=True,
+        choices=("ga4", "search_console"),
+        help="connector source (read-only)",
+    )
+    p_xfetch.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help=(
+            "force the connector to skip the upstream call regardless "
+            "of credential / SDK availability"
+        ),
+    )
+    p_xfetch.add_argument(
+        "--lookback-days",
+        type=int,
+        default=None,
+        help="lookback window in days (default: 28)",
+    )
+    p_xfetch.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_xfetch.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the fetch report MD/JSON are written",
+    )
+    p_xfetch.set_defaults(func=_cmd_analytics_fetch)
 
     # intake
     p_in = subs.add_parser(

@@ -1209,3 +1209,43 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6C
 - **Why deferred:** Calendar entries do not differentiate "weeks 1-2 = awareness/launch" vs "weeks 3-4 = nurture/conversion". A revision can carry `funnel_stage` per entry to align with the strategy report's narrative arc.
 - **Resolves at:** when an operator asks for explicit funnel sequencing.
+
+---
+
+## From MKT-6D (Google Analytics + Search Console read-only connectors)
+
+### P-6D.1 — OAuth onboarding flow / credentials wizard
+- **Introduced:** MKT-6D
+- **Why deferred:** Today the operator must provision a service-account JSON manually and set `GOOGLE_APPLICATION_CREDENTIALS`. A future block can add a guided wizard (or a workspace OAuth flow) that produces the JSON without touching the GCP console.
+- **Resolves at:** when several clients are onboarded and the manual flow becomes the bottleneck.
+
+### P-6D.2 — Explicit `--from` / `--to` date range
+- **Introduced:** MKT-6D
+- **Why deferred:** Today the CLI uses a rolling 28-day lookback (override via `--lookback-days`). Multi-period comparisons (P-6B.3 / P-6C.4) will need explicit ranges; add `--from YYYY-MM-DD` / `--to YYYY-MM-DD` then.
+- **Resolves at:** with P-6B.3.
+
+### P-6D.3 — Multi-property / multi-site fan-out
+- **Introduced:** MKT-6D
+- **Why deferred:** One CLI invocation = one property / site. Agencies serving the same client across multiple GA4 properties or country-specific Search Console properties need fan-out.
+- **Resolves at:** when an operator runs into the second-property case.
+- **Sketch:** accept `--source ga4 --property-id X,Y,Z`, fan out internally, emit one report per identifier with the same `report_id` group key.
+
+### P-6D.4 — Per-fetch cache
+- **Introduced:** MKT-6D
+- **Why deferred:** Repeated CLI calls within the same hour hit the upstream service. Cache by (source, identifier_fingerprint, window) with a short TTL (e.g. 1h).
+- **Resolves at:** when the fetch volume becomes meaningful.
+
+### P-6D.5 — Native `analytics-fetch.v1` audit envelope
+- **Introduced:** MKT-6D
+- **Why deferred:** Events are wrapped in `note` with `payload.analytics_fetch.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-6D.6 — Additional read-only connectors
+- **Introduced:** MKT-6D
+- **Why deferred:** The ABC is generic; same shape can host Bing Webmaster Tools, Meta Insights, TikTok Insights, LinkedIn Page Analytics — each as a new subclass + `SUPPORTED_SOURCES` entry + normaliser.
+- **Resolves at:** when the operator needs metrics from a non-Google source the manual importer doesn't cover.
+
+### P-6D.7 — Google Ads connector
+- **Introduced:** MKT-6D
+- **Why deferred:** Explicitly out of scope by user direction for this block. Even when added, must remain read-only (`SearchStream` / `Search`) and never call write operations.
+- **Resolves at:** only when the operator explicitly asks for it.
