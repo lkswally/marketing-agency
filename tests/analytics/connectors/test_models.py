@@ -42,7 +42,7 @@ def test_round_trip() -> None:
 
 
 def test_supported_sources_constant() -> None:
-    assert SUPPORTED_SOURCES == ("ga4", "search_console")
+    assert SUPPORTED_SOURCES == ("ga4", "search_console", "google_ads")
 
 
 def test_report_kind_constant() -> None:

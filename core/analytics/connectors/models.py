@@ -27,7 +27,7 @@ from core.domain.base import DomainModel, new_id, validate_slug
 ANALYTICS_FETCH_REPORT_VERSION = "analytics-fetch-report.v1"
 ANALYTICS_FETCH_REPORT_KIND = "analytics_fetch_report"
 
-SUPPORTED_SOURCES: tuple[str, ...] = ("ga4", "search_console")
+SUPPORTED_SOURCES: tuple[str, ...] = ("ga4", "search_console", "google_ads")
 
 
 class FetchStatus(StrEnum):

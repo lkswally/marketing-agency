@@ -48,13 +48,18 @@ from .base import (
     default_lookback_window,
 )
 from .ga4 import GA4ReadOnlyConnector
+from .google_ads import GoogleAdsReadOnlyConnector
 from .models import (
     ANALYTICS_FETCH_REPORT_KIND,
     SUPPORTED_SOURCES,
     AnalyticsFetchReport,
     FetchStatus,
 )
-from .normalizer import normalize_ga4_rows, normalize_search_console_rows
+from .normalizer import (
+    normalize_ga4_rows,
+    normalize_google_ads_rows,
+    normalize_search_console_rows,
+)
 from .search_console import SearchConsoleReadOnlyConnector
 
 DEFAULT_LOOKBACK_DAYS = 28
@@ -82,6 +87,8 @@ def resolve_connector(
         return GA4ReadOnlyConnector()
     if source == "search_console":
         return SearchConsoleReadOnlyConnector()
+    if source == "google_ads":
+        return GoogleAdsReadOnlyConnector()
     # Unreachable, kept for explicitness.
     raise ValueError(f"no connector wired for source {source!r}")
 
@@ -191,6 +198,8 @@ class AnalyticsFetchService:
             return normalize_ga4_rows(rows)
         if self._connector.source == "search_console":
             return normalize_search_console_rows(rows)
+        if self._connector.source == "google_ads":
+            return normalize_google_ads_rows(rows)
         return [], [f"no normaliser for source {self._connector.source!r}"]
 
     def _append_to_snapshot(

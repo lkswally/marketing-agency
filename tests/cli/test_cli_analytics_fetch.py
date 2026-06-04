@@ -25,13 +25,17 @@ def _run(argv: list[str]) -> tuple[int, str]:
 
 @pytest.fixture(autouse=True)
 def _scrub_google_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make sure no real GOOGLE_APPLICATION_CREDENTIALS / GA4_PROPERTY_ID
-    / SEARCH_CONSOLE_SITE_URL leaks from the host env into the test.
-    """
+    """Make sure no real Google env vars leak from the host env."""
     for k in (
         "GOOGLE_APPLICATION_CREDENTIALS",
         "GA4_PROPERTY_ID",
         "SEARCH_CONSOLE_SITE_URL",
+        "GOOGLE_ADS_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_CLIENT_ID",
+        "GOOGLE_ADS_CLIENT_SECRET",
+        "GOOGLE_ADS_REFRESH_TOKEN",
+        "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+        "GOOGLE_ADS_CUSTOMER_ID",
     ):
         monkeypatch.delenv(k, raising=False)
 
@@ -147,6 +151,37 @@ def test_dry_run_report_does_not_leak_env_keys(tmp_path: Path) -> None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+def test_dry_run_google_ads_exits_0_with_skipped(tmp_path: Path) -> None:
+    code, stdout = _run([
+        "analytics-fetch",
+        "--client", "acme",
+        "--source", "google_ads",
+        "--dry-run",
+        "--root", str(tmp_path / "mem"),
+        "--outputs-dir", str(tmp_path / "out"),
+    ])
+    assert code == 0, stdout
+    payload = json.loads(stdout)
+    assert payload["status"] == "skipped"
+    assert payload["source"] == "google_ads"
+    assert payload["dry_run"] is True
+
+
+def test_missing_creds_google_ads_skips(tmp_path: Path) -> None:
+    code, stdout = _run([
+        "analytics-fetch",
+        "--client", "acme",
+        "--source", "google_ads",
+        "--root", str(tmp_path / "mem"),
+        "--outputs-dir", str(tmp_path / "out"),
+    ])
+    assert code == 0, stdout
+    payload = json.loads(stdout)
+    assert payload["status"] == "skipped"
+    # The reason mentions at least one missing env var.
+    assert "GOOGLE_ADS_DEVELOPER_TOKEN" in (payload["reason"] or "")
 
 
 def test_lookback_days_flag_passed_through(tmp_path: Path) -> None:

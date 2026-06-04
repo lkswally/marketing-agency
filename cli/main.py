@@ -1736,7 +1736,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_xfetch.add_argument(
         "--source",
         required=True,
-        choices=("ga4", "search_console"),
+        choices=("ga4", "search_console", "google_ads"),
         help="connector source (read-only)",
     )
     p_xfetch.add_argument(

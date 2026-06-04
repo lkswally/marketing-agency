@@ -1245,7 +1245,52 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Why deferred:** The ABC is generic; same shape can host Bing Webmaster Tools, Meta Insights, TikTok Insights, LinkedIn Page Analytics — each as a new subclass + `SUPPORTED_SOURCES` entry + normaliser.
 - **Resolves at:** when the operator needs metrics from a non-Google source the manual importer doesn't cover.
 
-### P-6D.7 — Google Ads connector
+### P-6D.7 — Google Ads connector  ✅ RESOLVED in MKT-6E
 - **Introduced:** MKT-6D
-- **Why deferred:** Explicitly out of scope by user direction for this block. Even when added, must remain read-only (`SearchStream` / `Search`) and never call write operations.
-- **Resolves at:** only when the operator explicitly asks for it.
+- **Resolved at:** MKT-6E — `core/analytics/connectors/google_ads.py` with `GoogleAdsReadOnlyConnector` using `GoogleAdsService.search_stream` only.
+- **Notes:** Read-only strict. Cardinal pins grep-asserted.
+
+---
+
+## From MKT-6E (Google Ads read-only connector)
+
+### P-6E.1 — `search_term_view` query for negative-keyword candidates
+- **Introduced:** MKT-6E
+- **Why deferred:** The connector currently queries the `ad_group` view only. Negative-keyword detection requires `FROM search_term_view` with `segments.search_term_match_type` and per-term metrics. Drops nicely into the existing connector — additional GAQL query + normaliser branch + analyzer rule.
+- **Resolves at:** when an operator hits a campaign with budget bleed on irrelevant queries.
+
+### P-6E.2 — `keyword_view` query for keyword-level performance
+- **Introduced:** MKT-6E
+- **Why deferred:** Same shape as P-6E.1 — a second GAQL query at the keyword level (`ad_group_criterion.keyword.text`, `ad_group_criterion.keyword.match_type`).
+- **Resolves at:** with P-6E.1.
+
+### P-6E.3 — `ad_group_ad` query for creative-level CTR detection
+- **Introduced:** MKT-6E
+- **Why deferred:** Low-CTR ad detection at the creative level (responsive search ads, individual ad variants) requires `FROM ad_group_ad` with headline / description segments.
+- **Resolves at:** when copy iteration becomes a recurring ask.
+
+### P-6E.4 — `landing_page_view` query for landing-page opportunities
+- **Introduced:** MKT-6E
+- **Why deferred:** Landing-page optimisation suggestions need `FROM landing_page_view` (expanded URL + per-URL metrics) plus a join against the GA4 landing-page metrics for cross-source validation.
+- **Resolves at:** when an operator wants funnel-stage analysis.
+
+### P-6E.5 — Audience / demographic segmentation
+- **Introduced:** MKT-6E
+- **Why deferred:** `segments.audience`, `segments.age_range`, `segments.gender` add a dimensional layer the current normaliser does not encode. Requires extending `MetricRow.dimension` semantics or a richer secondary-dimension shape.
+- **Resolves at:** future block.
+
+### P-6E.6 — Multi-customer MCC fan-out
+- **Introduced:** MKT-6E
+- **Why deferred:** One CLI invocation = one `GOOGLE_ADS_CUSTOMER_ID`. Agencies on an MCC reading 10+ accounts in one pass need fan-out.
+- **Resolves at:** when the operator runs into the second-account case.
+- **Sketch:** accept `--customer-id A,B,C`, fan out internally, emit one report per customer with a shared `group_id`.
+
+### P-6E.7 — Native analyzer rules for Google Ads detections
+- **Introduced:** MKT-6E
+- **Why deferred:** The connector lands rows; the analyzer currently rolls them up at the channel level. Explicit "pause campaign X — high spend / 0 conversions in 28 days" or "negative-keyword candidate: <term>" recommendations require new rules in `core/analytics/analyzer.py` and `core/feedback/planner.py`.
+- **Resolves at:** when MKT-6E rows are flowing through the snapshot regularly.
+
+### P-6E.8 — Native `analytics-fetch.v1` audit envelope for Google Ads
+- **Introduced:** MKT-6E
+- **Why deferred:** Same trade-off as P-6D.5 — events wrapped in `note` with `payload.analytics_fetch.{action, source, ...}`.
+- **Resolves at:** bundled with the next audit-trail bump.

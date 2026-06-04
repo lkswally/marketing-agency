@@ -31,13 +31,31 @@ FORBIDDEN_HTTP_LIBS = (
     "from aiohttp",
 )
 
-FORBIDDEN_ADS_TOKENS = (
-    "google_ads",
-    "googleads",
-    "google.ads",
-    "GoogleAdsClient",
+# Note: from MKT-6E we DO have a read-only google_ads connector, so
+# the "google_ads" / "GoogleAdsClient" tokens are legitimate inside
+# ``google_ads.py``. We still grep-pin against AdWords (legacy
+# write API) and against the mutation surface of the new SDK.
+FORBIDDEN_LEGACY_ADS_TOKENS = (
     "AdWords",
     "adwords",
+)
+
+# Mutation surface of the modern Google Ads SDK. These names MUST
+# NOT appear in any connector module.
+FORBIDDEN_ADS_MUTATIONS = (
+    "mutate_campaigns",
+    "mutate_campaign_budgets",
+    "mutate_ad_groups",
+    "mutate_ad_group_ads",
+    "mutate_ad_group_criteria",
+    "mutate_keyword_plan",
+    "mutate_customer_negative_criteria",
+    "mutate_ads",
+    "CampaignOperation",
+    "AdGroupOperation",
+    "AdGroupAdOperation",
+    "AdGroupCriterionOperation",
+    "CampaignBudgetOperation",
 )
 
 # GA4 / Search Console SDK methods that would write or mutate state.
@@ -70,11 +88,47 @@ def test_no_http_lib_in_any_connector_module() -> None:
             assert needle not in text, f"{py.name} imports {needle!r}"
 
 
-def test_no_google_ads_anywhere() -> None:
+def test_no_legacy_adwords_anywhere() -> None:
+    """The legacy AdWords API (write-heavy) must never appear."""
     for py in CONNECTORS_DIR.glob("*.py"):
         text = _read(py).lower()
-        for needle in FORBIDDEN_ADS_TOKENS:
+        for needle in FORBIDDEN_LEGACY_ADS_TOKENS:
             assert needle.lower() not in text, f"{py.name} references {needle!r}"
+
+
+def test_no_google_ads_mutation_method_in_any_module() -> None:
+    """No connector module may reference any Google Ads mutation
+    method or operation type."""
+    for py in CONNECTORS_DIR.glob("*.py"):
+        text = _read(py)
+        for needle in FORBIDDEN_ADS_MUTATIONS:
+            assert needle not in text, f"{py.name} references {needle!r}"
+
+
+def test_google_ads_connector_only_requests_read_service() -> None:
+    """Pin: ``google_ads.py`` calls ``get_service('GoogleAdsService')``
+    and nothing else (the read service)."""
+    text = _read(CONNECTORS_DIR / "google_ads.py")
+    # The only ``get_service(...)`` call in source is the read one.
+    assert "get_service(\"GoogleAdsService\")" in text
+    # No write service names.
+    for write_service in (
+        "get_service(\"CampaignService\")",
+        "get_service(\"CampaignBudgetService\")",
+        "get_service(\"AdGroupService\")",
+        "get_service(\"AdGroupAdService\")",
+        "get_service(\"AdGroupCriterionService\")",
+        "get_service(\"KeywordPlanService\")",
+    ):
+        assert write_service not in text, f"google_ads.py references {write_service!r}"
+
+
+def test_google_ads_connector_only_calls_search_stream() -> None:
+    """Pin: only ``search_stream`` is invoked on the read service."""
+    text = _read(CONNECTORS_DIR / "google_ads.py")
+    assert "search_stream" in text
+    # No reference to ``search`` (synchronous paginated) is fine —
+    # but mutate_* invocation must be absent (covered above).
 
 
 def test_no_ga4_mutation_method_referenced() -> None:

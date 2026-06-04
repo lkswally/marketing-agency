@@ -126,6 +126,111 @@ def normalize_search_console_rows(
     return out, reasons
 
 
+_GOOGLE_ADS_METRIC_KEYS: tuple[str, ...] = (
+    "metrics.impressions",
+    "metrics.clicks",
+    "metrics.cost_micros",
+    "metrics.conversions",
+    "metrics.ctr",
+    "metrics.average_cpc",
+    "metrics.conversions_value",
+    "metrics.cost_per_conversion",
+)
+
+# Mapping from Google Ads metric keys to the snake_case metric_name
+# the analyzer recognises. ``cost_micros`` is divided by 1_000_000
+# inside ``normalize_google_ads_rows`` so the persisted value is in
+# the same currency unit the user sees in the Ads UI.
+_GOOGLE_ADS_METRIC_RENAME: dict[str, str] = {
+    "metrics.impressions": "impressions",
+    "metrics.clicks": "clicks",
+    "metrics.cost_micros": "cost",
+    "metrics.conversions": "conversions",
+    "metrics.ctr": "ctr",
+    "metrics.average_cpc": "cpc",
+    "metrics.conversions_value": "conversions_value",
+    "metrics.cost_per_conversion": "cpa",
+}
+
+
+def normalize_google_ads_rows(
+    rows: list[dict[str, object]],
+) -> tuple[list, list[str]]:
+    """Convert Google Ads ad_group rows to :class:`MetricRow`.
+
+    Each ad_group row produces up to 8 metric rows (one per metric
+    key). The channel slug is ``google_ads``; ``content_ref``
+    encodes ``campaign:<id>::ad_group:<id>`` so downstream rollups
+    can re-segment by campaign or ad group. ``dimension`` carries
+    the human campaign + ad group names.
+
+    Cost is converted from *micros* to whole units
+    (``cost_micros / 1_000_000``) so the analyzer sees comparable
+    values to the GA4 / Search Console pipelines.
+    """
+
+    out: list = []
+    reasons: list[str] = []
+    for i, raw in enumerate(rows):
+        parsed_date = _parse_ga4_date(_str(raw.get("segments.date")))
+        campaign_id = _str(raw.get("campaign.id"))
+        campaign_name = _str(raw.get("campaign.name"))
+        ad_group_id = _str(raw.get("ad_group.id"))
+        ad_group_name = _str(raw.get("ad_group.name"))
+
+        if not (campaign_id or ad_group_id):
+            reasons.append(f"row {i + 1}: missing campaign.id / ad_group.id")
+            continue
+
+        content_ref = f"campaign:{campaign_id}::ad_group:{ad_group_id}"
+        dimension = " / ".join(p for p in (campaign_name, ad_group_name) if p)
+
+        any_metric = False
+        for key in _GOOGLE_ADS_METRIC_KEYS:
+            if key not in raw:
+                continue
+            number = _to_float(raw[key])
+            if number is None:
+                continue
+            metric_name = _GOOGLE_ADS_METRIC_RENAME[key]
+            if metric_name == "cost":
+                number = number / 1_000_000.0
+            out.append(_build_google_ads_metric_row(
+                event_date=parsed_date,
+                content_ref=content_ref,
+                dimension=dimension,
+                metric_name=metric_name,
+                value=number,
+            ))
+            any_metric = True
+        if not any_metric:
+            reasons.append(f"row {i + 1}: no Google Ads numeric metric found")
+    return out, reasons
+
+
+def _build_google_ads_metric_row(
+    *,
+    event_date,
+    content_ref: str,
+    dimension: str,
+    metric_name: str,
+    value: float,
+):
+    # Local import to keep module-level imports minimal and the
+    # MetricSource enum self-contained at the analytics root.
+    from core.analytics.models import MetricRow, MetricSource
+
+    return MetricRow(
+        source=MetricSource.GOOGLE_ADS,
+        event_date=event_date,
+        channel="google_ads",
+        content_ref=content_ref,
+        metric_name=metric_name,
+        value=value,
+        dimension=dimension or None,
+    )
+
+
 # ---------- helpers ----------
 
 
@@ -200,5 +305,6 @@ def _to_float(value: object) -> float | None:
 
 __all__ = [
     "normalize_ga4_rows",
+    "normalize_google_ads_rows",
     "normalize_search_console_rows",
 ]

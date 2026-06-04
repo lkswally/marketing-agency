@@ -32,6 +32,7 @@ from .base import (
     DryRunConnector,
 )
 from .ga4 import GA4ReadOnlyConnector
+from .google_ads import GoogleAdsReadOnlyConnector
 from .models import (
     ANALYTICS_FETCH_REPORT_KIND,
     ANALYTICS_FETCH_REPORT_VERSION,
@@ -41,6 +42,7 @@ from .models import (
 )
 from .normalizer import (
     normalize_ga4_rows,
+    normalize_google_ads_rows,
     normalize_search_console_rows,
 )
 from .search_console import SearchConsoleReadOnlyConnector
@@ -63,10 +65,12 @@ __all__ = [
     "DryRunConnector",
     "FetchStatus",
     "GA4ReadOnlyConnector",
+    "GoogleAdsReadOnlyConnector",
     "SUPPORTED_SOURCES",
     "SearchConsoleReadOnlyConnector",
     "fetch_and_persist",
     "normalize_ga4_rows",
+    "normalize_google_ads_rows",
     "normalize_search_console_rows",
     "resolve_connector",
 ]

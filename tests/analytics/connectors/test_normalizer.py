@@ -6,6 +6,7 @@ from datetime import date
 
 from core.analytics.connectors.normalizer import (
     normalize_ga4_rows,
+    normalize_google_ads_rows,
     normalize_search_console_rows,
 )
 from core.analytics.models import MetricSource
@@ -103,6 +104,87 @@ def test_ga4_slugify_handles_special_characters() -> None:
     ]
     out, _ = normalize_ga4_rows(rows)
     assert out[0].channel == "paid_search_brand"
+
+
+def test_google_ads_row_produces_one_row_per_metric() -> None:
+    rows = [
+        {
+            "campaign.id": "1",
+            "campaign.name": "Brand Search",
+            "ad_group.id": "100",
+            "ad_group.name": "Exact Match",
+            "segments.date": "2026-05-15",
+            "metrics.impressions": 1000,
+            "metrics.clicks": 50,
+            "metrics.cost_micros": 25_000_000,  # $25
+            "metrics.conversions": 3.0,
+            "metrics.ctr": 0.05,
+            "metrics.average_cpc": 500_000.0,
+            "metrics.conversions_value": 150.0,
+            "metrics.cost_per_conversion": 8.0,
+        }
+    ]
+    out, reasons = normalize_google_ads_rows(rows)
+    assert reasons == []
+    assert len(out) == 8
+    for r in out:
+        assert r.source is MetricSource.GOOGLE_ADS
+        assert r.event_date == date(2026, 5, 15)
+        assert r.channel == "google_ads"
+        assert r.content_ref == "campaign:1::ad_group:100"
+        assert r.dimension == "Brand Search / Exact Match"
+
+    by_name = {r.metric_name: r.value for r in out}
+    # Cost is divided by 1_000_000 from micros to whole units.
+    assert by_name["cost"] == 25.0
+    assert by_name["impressions"] == 1000.0
+    assert by_name["clicks"] == 50.0
+    assert by_name["conversions"] == 3.0
+    assert by_name["ctr"] == 0.05
+    assert by_name["cpc"] == 500_000.0
+    assert by_name["cpa"] == 8.0
+
+
+def test_google_ads_rejects_row_with_no_identifiers() -> None:
+    rows = [{"segments.date": "2026-05-15", "metrics.clicks": 10}]
+    out, reasons = normalize_google_ads_rows(rows)
+    assert out == []
+    assert "missing campaign.id" in reasons[0]
+
+
+def test_google_ads_rejects_row_with_no_metric() -> None:
+    rows = [{
+        "campaign.id": "1", "campaign.name": "X",
+        "ad_group.id": "2", "ad_group.name": "Y",
+        "segments.date": "2026-05-15",
+    }]
+    out, reasons = normalize_google_ads_rows(rows)
+    assert out == []
+    assert "no Google Ads numeric metric" in reasons[0]
+
+
+def test_google_ads_skips_non_numeric_values() -> None:
+    rows = [{
+        "campaign.id": "1",
+        "ad_group.id": "100",
+        "segments.date": "2026-05-15",
+        "metrics.impressions": "not-a-number",
+        "metrics.clicks": 5,
+    }]
+    out, _ = normalize_google_ads_rows(rows)
+    assert len(out) == 1
+    assert out[0].metric_name == "clicks"
+    assert out[0].value == 5.0
+
+
+def test_google_ads_partial_dimension_when_campaign_name_only() -> None:
+    rows = [{
+        "campaign.id": "1", "campaign.name": "Brand",
+        "ad_group.id": "100", "ad_group.name": "",
+        "metrics.clicks": 5,
+    }]
+    out, _ = normalize_google_ads_rows(rows)
+    assert out[0].dimension == "Brand"
 
 
 def test_search_console_percent_string_parsed() -> None:

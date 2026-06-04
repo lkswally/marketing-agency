@@ -45,6 +45,7 @@ class MetricSource(StrEnum):
     SOCIAL = "social"
     EMAIL = "email"
     MANUAL = "manual"
+    GOOGLE_ADS = "google_ads"
 
 
 class RecommendationKind(StrEnum):

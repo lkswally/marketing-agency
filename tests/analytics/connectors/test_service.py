@@ -192,6 +192,33 @@ def test_fetch_partial_when_some_rows_invalid(tmp_path: Path) -> None:
     assert report.rows_rejected == 1
 
 
+def test_fetch_google_ads_ok(tmp_path: Path) -> None:
+    mem = JsonFileMemory(tmp_path / "mem")
+    rows = [
+        {
+            "campaign.id": "1", "campaign.name": "Brand",
+            "ad_group.id": "100", "ad_group.name": "Exact",
+            "segments.date": "2026-05-15",
+            "metrics.impressions": 1000, "metrics.clicks": 50,
+            "metrics.cost_micros": 25_000_000, "metrics.conversions": 3.0,
+            "metrics.ctr": 0.05, "metrics.average_cpc": 500_000.0,
+            "metrics.conversions_value": 150.0,
+            "metrics.cost_per_conversion": 8.0,
+        },
+    ]
+    fake = _FakeConnector("google_ads", rows=rows)
+    report = AnalyticsFetchService(memory=mem, connector=fake).run(client_slug="acme")
+    assert report.status is FetchStatus.OK
+    # 8 metric rows per ad_group row
+    assert report.rows_normalized == 8
+
+
+def test_resolve_connector_google_ads() -> None:
+    """The resolver must accept ``google_ads``."""
+    c = resolve_connector("google_ads", dry_run=True)
+    assert c.source == "google_ads"
+
+
 def test_fetch_search_console_ok(tmp_path: Path) -> None:
     mem = JsonFileMemory(tmp_path / "mem")
     rows = [
