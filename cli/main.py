@@ -1116,6 +1116,61 @@ def _cmd_analytics_fetch(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_ads_analyze(args: argparse.Namespace, *, out) -> int:
+    """Run the Google Ads analyzer (MKT-6F) over the persisted
+    metrics snapshot.
+
+    Reads ``MetricsSnapshot`` rows tagged with
+    ``MetricSource.GOOGLE_ADS``, applies a deterministic rule set
+    and emits a :class:`GoogleAdsInsightPack`.
+
+    Exit codes:
+    - 0 on success.
+    - 2 when there is no ``MetricsSnapshot`` for the client.
+    """
+
+    from core.ads_analysis import (
+        GoogleAdsAnalyzer,
+        render_markdown_ads_insights,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    analyzer = GoogleAdsAnalyzer(memory=memory)
+    try:
+        pack = analyzer.analyze(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    analyzer.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "google-ads-insight-pack.md"
+    md_path.write_text(render_markdown_ads_insights(pack), encoding="utf-8")
+    json_path = outputs_dir / "google-ads-insight-pack.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "snapshot_id": pack.snapshot_id,
+        "stats": {
+            "total_insights": pack.stats.total_insights,
+            "ad_groups_profiled": pack.stats.ad_groups_profiled,
+            "rows_analyzed": pack.stats.rows_analyzed,
+            "by_severity": pack.stats.by_severity,
+            "by_action": pack.stats.by_action,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -1765,6 +1820,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the fetch report MD/JSON are written",
     )
     p_xfetch.set_defaults(func=_cmd_analytics_fetch)
+
+    # ads-analyze (MKT-6F)
+    p_ads = subs.add_parser(
+        "ads-analyze",
+        help=(
+            "run native Google Ads rules over the persisted metrics "
+            "snapshot. Read-only — no campaign mutation, no budget "
+            "change, suggestions only."
+        ),
+    )
+    p_ads.add_argument("--client", required=True, help="client slug")
+    p_ads.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_ads.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the insight pack MD/JSON are written",
+    )
+    p_ads.set_defaults(func=_cmd_ads_analyze)
 
     # intake
     p_in = subs.add_parser(

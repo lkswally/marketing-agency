@@ -1294,3 +1294,48 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-6E
 - **Why deferred:** Same trade-off as P-6D.5 — events wrapped in `note` with `payload.analytics_fetch.{action, source, ...}`.
 - **Resolves at:** bundled with the next audit-trail bump.
+
+---
+
+## From MKT-6F (Google Ads analyzer rules)
+
+### P-6F.1 — Per-tenant threshold overrides
+- **Introduced:** MKT-6F
+- **Why deferred:** Today `_HIGH_SPEND_ZERO_CONV_COST`, `_LOW_CTR_THRESHOLD`, etc. are module constants tuned for a generic "small B2B" baseline. Different tenants need different thresholds (e-commerce vs lead gen vs SaaS).
+- **Resolves at:** when an operator hits a baseline mismatch on a second tenant.
+- **Sketch:** load `<root>/<client>/ads-analyzer-config.json` (optional) with float overrides per threshold; fall back to module constants.
+
+### P-6F.2 — Search-term-level insights
+- **Introduced:** MKT-6F
+- **Why deferred:** Negative-keyword candidate detection requires search-term rows in the snapshot. Depends on P-6E.1 (search-term query at the connector).
+- **Resolves at:** with P-6E.1.
+
+### P-6F.3 — Ad-creative-level insights
+- **Introduced:** MKT-6F
+- **Why deferred:** Low-CTR detection at the creative level (per ad variant) requires creative-level rows. Depends on P-6E.3 (`ad_group_ad` query at the connector).
+- **Resolves at:** with P-6E.3.
+
+### P-6F.4 — Landing-page cross-validation against GA4
+- **Introduced:** MKT-6F
+- **Why deferred:** `review_landing` today fires from CTR/conversion-rate mismatch. A future rule can cross-validate against GA4 landing-page rows (bounce rate, sessions) to lift signal quality.
+- **Resolves at:** when both Ads and GA4 rows are reliably in the snapshot.
+
+### P-6F.5 — Auto-promotion of insights into the feedback / iteration pack
+- **Introduced:** MKT-6F
+- **Why deferred:** `AdsInsightAction.PAUSE_CANDIDATE` / `SCALE_CANDIDATE` / `IMPROVE_AD_COPY` map cleanly to MKT-6B `ContentSuggestion` / MKT-6C `IterationAction`. A future block can opt-in promote them on `mkt feedback-plan --include-ads-insights` and `mkt apply-feedback --include-ads-insights`.
+- **Resolves at:** future block.
+
+### P-6F.6 — LLM-enriched rationale
+- **Introduced:** MKT-6F
+- **Why deferred:** Today rationales are templated. An opt-in flag could route through the MKT-4B Claude invoker for richer prose (especially around `review_campaign` / `review_landing`).
+- **Resolves at:** future block.
+
+### P-6F.7 — Native `google_ads_insight_pack.v1` audit envelope
+- **Introduced:** MKT-6F
+- **Why deferred:** Events are wrapped in `note` with `payload.google_ads_insight_pack.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-6F.8 — Multi-period comparison (this cycle vs last cycle)
+- **Introduced:** MKT-6F
+- **Why deferred:** The analyzer sees one snapshot. Comparing this cycle's insights against the previous cycle's pack would surface deltas ("CPA on Brand campaign was median × 1.2, now median × 2.5"). Requires P-6A.3 time-ranged snapshots.
+- **Resolves at:** with P-6A.3.
