@@ -1408,6 +1408,50 @@ def _cmd_image_jobs(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+_PORTAL_INSTALL_HINT = (
+    "Streamlit is not installed. Install the optional `portal` extra:\n"
+    "    pip install -e \".[portal]\""
+)
+
+
+def _cmd_portal(args: argparse.Namespace, *, out) -> int:
+    """Launch the read-only Streamlit portal (MKT-9A).
+
+    Thin wrapper over ``streamlit run portal/app.py``. The wrapper
+    does NOT write any file — it only spawns the Streamlit server
+    after verifying the dependency is available.
+
+    Exit codes:
+    - 0 when the portal exits cleanly.
+    - 2 when Streamlit is not installed (with install hint).
+    """
+
+    # Probe streamlit without importing the heavy modules. We use
+    # importlib.util.find_spec so the wrapper itself does not need
+    # streamlit at import time.
+    import importlib.util
+
+    if importlib.util.find_spec("streamlit") is None:
+        print(_PORTAL_INSTALL_HINT, file=out)
+        return 2
+
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parents[1]
+    app_path = repo_root / "portal" / "app.py"
+    if not app_path.exists():
+        print(f"error: portal app missing at {app_path}", file=out)
+        return 2
+
+    cmd = [
+        sys.executable, "-m", "streamlit", "run", str(app_path),
+        "--", "--root", str(args.root), "--outputs-dir", str(args.outputs_dir),
+    ]
+    # Stream Streamlit's stdout/stderr to the operator terminal —
+    # capture nothing, write nothing to disk.
+    return subprocess.call(cmd)
+
+
 def _cmd_atlas_handoff(args: argparse.Namespace, *, out) -> int:
     """Build an ATLAS handoff brief (MKT-8A) for one of three kinds:
     ``landing`` / ``branding`` / ``page_design``.
@@ -2337,6 +2381,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the handoff MD/JSON are written",
     )
     p_ah.set_defaults(func=_cmd_atlas_handoff)
+
+    # portal (MKT-9A)
+    p_portal = subs.add_parser(
+        "portal",
+        help=(
+            "launch the read-only Streamlit portal locally. No "
+            "writes, no APIs. Requires `pip install -e .[portal]`."
+        ),
+    )
+    p_portal.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_portal.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="outputs directory the portal scans (default: outputs)",
+    )
+    p_portal.set_defaults(func=_cmd_portal)
 
     # intake
     p_in = subs.add_parser(

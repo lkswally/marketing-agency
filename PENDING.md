@@ -1541,3 +1541,37 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-8A
 - **Why deferred:** Markdown labels are in English; the body copy honours the client locale because it comes verbatim from the strategy report. A future block can localise the section headers / banner text per `intake.locale`.
 - **Resolves at:** when a non-English-speaking ATLAS team needs the brief in their language.
+
+---
+
+## From MKT-9A (read-only portal MVP)
+
+### P-9A.1 — Auth + multi-user
+- **Introduced:** MKT-9A
+- **Why deferred:** The portal is single-user, single-machine. Multi-user requires auth (Streamlit-Authenticator or external SSO) and a session story.
+- **Resolves at:** when the agency wants to share the portal across operators.
+
+### P-9A.2 — Auto-refresh on disk changes
+- **Introduced:** MKT-9A
+- **Why deferred:** Today the operator refreshes the browser to pick up new packs. A `watchdog`-backed file-mtime poll + `st.rerun()` could auto-refresh.
+- **Resolves at:** when operators run the portal alongside long pipelines.
+
+### P-9A.3 — Export checklist + summary to PDF
+- **Introduced:** MKT-9A
+- **Why deferred:** Useful for client review meetings. Streamlit has no native PDF export — would require WeasyPrint or a server-side render. Keeps the portal lean for now.
+- **Resolves at:** when an operator needs a take-home checklist.
+
+### P-9A.4 — Cycle-vs-cycle comparison view
+- **Introduced:** MKT-9A
+- **Why deferred:** Once a client has multiple cycles, comparing this cycle's packs against the previous one would help spot drift. Requires P-6A.3 (time-ranged snapshots) first.
+- **Resolves at:** with P-6A.3.
+
+### P-9A.5 — Full-text search across rendered Markdown
+- **Introduced:** MKT-9A
+- **Why deferred:** Streamlit has a built-in input but no native indexed search. A simple substring scan over each pack's MD would work; per-client whoosh / sqlite-fts is overkill for now.
+- **Resolves at:** when packs grow large enough that grepping the outputs dir becomes annoying.
+
+### P-9A.6 — Editing opt-in (explicitly out of scope today)
+- **Introduced:** MKT-9A
+- **Why deferred:** The user spec for MKT-9A explicitly forbade editing. A future block can add a feature-flagged edit mode that produces a diff + audit event without touching disk silently.
+- **Resolves at:** only when operators explicitly ask for it.
