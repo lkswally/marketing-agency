@@ -1408,6 +1408,75 @@ def _cmd_image_jobs(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_atlas_handoff(args: argparse.Namespace, *, out) -> int:
+    """Build an ATLAS handoff brief (MKT-8A) for one of three kinds:
+    ``landing`` / ``branding`` / ``page_design``.
+
+    The handoff is a plain Markdown + JSON deliverable. No HTTP
+    call. No reach-in into ATLAS — the operator copies / pastes
+    the brief into whatever ATLAS workflow they use today.
+
+    Exit codes:
+    - 0 on success
+    - 2 when there is no CampaignStrategyReport for the client
+      (run `mkt run-strategy` / `mkt run-campaign` first)
+    """
+    from core.atlas_bridge import (
+        AtlasHandoffFactory,
+        AtlasHandoffKind,
+        render_markdown_atlas_handoff,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    factory = AtlasHandoffFactory(memory=memory)
+    try:
+        kind = AtlasHandoffKind(args.kind)
+    except ValueError:
+        print(
+            f"error: unsupported kind {args.kind!r} — must be one of "
+            "landing | branding | page_design",
+            file=out,
+        )
+        return 2
+    try:
+        handoff = factory.build(
+            client_slug=args.client, kind=kind, page_name=args.page_name,
+        )
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    factory.persist(handoff)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    # Per MKT-8A final spec: ``atlas-<kind>-brief.{md,json}``.
+    # ``page_design`` stays hyphenated for filesystem-friendliness.
+    file_kind = kind.value.replace("_", "-")
+    md_path = outputs_dir / f"atlas-{file_kind}-brief.md"
+    md_path.write_text(render_markdown_atlas_handoff(handoff), encoding="utf-8")
+    json_path = outputs_dir / f"atlas-{file_kind}-brief.json"
+    json_path.write_text(handoff.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "handoff_id": handoff.handoff_id,
+        "client_slug": handoff.client_slug,
+        "contract_version": handoff.contract_version,
+        "kind": handoff.kind.value,
+        "strategy_report_id": handoff.strategy_report_id,
+        "creative_pack_id": handoff.creative_pack_id,
+        "visual_pack_id": handoff.visual_pack_id,
+        "approval_pack_id": handoff.approval_pack_id,
+        "image_job_pack_id": handoff.image_job_pack_id,
+        "blocks_publish": handoff.blocks_publish,
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": handoff.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_image_provider_plan(args: argparse.Namespace, *, out) -> int:
     """Score image providers + emit a dry-run preview per job (MKT-7B).
 
@@ -2235,6 +2304,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the provider plan MD/JSON are written",
     )
     p_ipp.set_defaults(func=_cmd_image_provider_plan)
+
+    # atlas-brief (MKT-8A)
+    p_ah = subs.add_parser(
+        "atlas-brief",
+        help=(
+            "build an ATLAS handoff brief (landing / branding / "
+            "page_design). No HTTP, no reach-in into ATLAS; the "
+            "operator copies the artifact into the ATLAS workflow."
+        ),
+    )
+    p_ah.add_argument("--client", required=True, help="client slug")
+    p_ah.add_argument(
+        "--kind",
+        required=True,
+        choices=("landing", "branding", "page_design"),
+        help="which handoff brief to build",
+    )
+    p_ah.add_argument(
+        "--page-name",
+        default=None,
+        help="page name (only used when --kind=page_design)",
+    )
+    p_ah.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_ah.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the handoff MD/JSON are written",
+    )
+    p_ah.set_defaults(func=_cmd_atlas_handoff)
 
     # intake
     p_in = subs.add_parser(

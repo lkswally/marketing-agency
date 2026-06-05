@@ -1,0 +1,72 @@
+{
+  "schema_version": "client-intake.v1",
+  "_note": "MKT-8A Alpha Pilot template. Replace every <PLACEHOLDER> with real data. Fields marked OPTIONAL may be deleted entirely if not applicable. Keep the file under 1 MB.",
+  "client_name": "<Legal name of the client business>",
+  "industry": "<Industry — e.g. 'specialty coffee', 'B2B SaaS', 'local services'>",
+  "market": "<Primary market — e.g. 'AR-CABA', 'LATAM', 'EMEA', 'global'>",
+  "product_or_service": "<One-sentence description of the product / service>",
+  "product_type": "<subscription | one_off | service | physical_product | course | other>",
+  "audience_description": "<Concrete description of the target audience — who they are, what they do, what they care about>",
+  "commercial_objective": "<Measurable commercial objective for the campaign cycle — e.g. '50 qualified demos / month for 90 days'>",
+  "brand_tone": [
+    "<adjective>",
+    "<adjective>",
+    "<adjective>"
+  ],
+  "preferred_words": [
+    "<word>",
+    "<word>"
+  ],
+  "forbidden_words": [
+    "<word>",
+    "<word>"
+  ],
+  "claim_style": "<How aggressive / cautious the claims should be. E.g. 'concrete, sourced, no superlatives'>",
+  "possible_channels": [
+    "newsletter",
+    "blog",
+    "linkedin",
+    "instagram",
+    "google_ads",
+    "x"
+  ],
+  "known_competitors": [
+    {
+      "name": "<Competitor name>",
+      "url": "<https://competitor.example>",
+      "notes": "<What they do well / poorly>"
+    }
+  ],
+  "budget_estimate": 0,
+  "budget_currency": "USD",
+  "deadline": "<YYYY-MM-DD>",
+  "duration_weeks": 4,
+  "primary_kpi": "<qualified_trials | demos | mql | revenue | sign_ups | bookings>",
+  "locale": "<es-AR | es-ES | en-US | pt-BR | ...>",
+  "constraints": [
+    "<Hard constraint — e.g. 'no paid ads in month 1'>",
+    "<Hard constraint — e.g. 'voice of the founder as narrator'>"
+  ],
+  "claims_to_avoid": [
+    "<Claim the client must never make — e.g. 'guaranteed'>"
+  ],
+  "_alpha_pilot_notes": {
+    "account_lead": "<Name of the agency account lead>",
+    "approval_reviewer": "<Name of the reviewer who signs the approval pack>",
+    "atlas_handoff_expected_kinds": [
+      "landing",
+      "branding",
+      "page_design"
+    ],
+    "atlas_handoff_target_pages": [
+      "landing",
+      "about",
+      "services",
+      "pricing"
+    ],
+    "real_publication_authorised": false,
+    "real_image_generation_authorised": false,
+    "real_google_ads_writes_authorised": false,
+    "_safety_reminder": "Every flag above MUST stay false during the MKT-8A alpha pilot. MARKETING-AGENCY-OS never publishes, never generates images and never writes to Google Ads — these flags exist so the operator can audit intent vs reality."
+  }
+}

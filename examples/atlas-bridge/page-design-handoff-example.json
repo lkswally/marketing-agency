@@ -1,0 +1,106 @@
+{
+  "contract_version": "atlas-handoff-brief.v1",
+  "handoff_id": "36a8e93d305e4cb8bcff26cb4e7949b3",
+  "client_slug": "acme-bootstrapped",
+  "kind": "page_design",
+  "landing_brief": null,
+  "branding_brief": null,
+  "page_design_brief": {
+    "contract_version": "page-design-brief.v1",
+    "brief_id": "a4d8aa2719934a8792fe501f82a950d9",
+    "page_name": "about",
+    "page_objective": "Generic `about` page supporting the campaign — informational, not directly conversion-driven.",
+    "target_audience": "Fundadores de SaaS bootstrapped en LATAM, equipos de 1-5 personas, sin capital... | Pain points: Falta de tiempo, Sobrecarga informativa | Desired outcomes: Lograr qualified trials",
+    "blocks": [
+      {
+        "block_id": "95ec06381c5c42cbbc5cc1ec06626af6",
+        "name": "intro",
+        "intent": "Introduce the `about` page in 2-3 sentences.",
+        "body_copy": "Bienvenido a about. Acme Bootstrapped: campaña 10 semanas para Fundadores de SaaS bootstrapped en LATAM, equipos de 1-5 personas, sin capital... con foco en qualified_trials.",
+        "visual_notes": null,
+        "assets": []
+      },
+      {
+        "block_id": "45378bae766c411e9f88262c85abbbb9",
+        "name": "value_proposition",
+        "intent": "State the value proposition for the visitor.",
+        "body_copy": "Acme Pro: equipos para resolver falta de tiempo. | suite de automatización de marketing para equipos chicos | Differentiators: suite de automatización de marketing para equipos chicos, Resuelve un dolor concreto: Falta de tiempo, Acme Pro — suite de automatización de marketing para equipos chicos\n\nEl cliente prefiere foco en Spanish LATAM y voz del fundador, Mide impacto contra: Generar 150 trials calificados por mes en LATAM en el próximo trimestre, Setup en menos de un día",
+        "visual_notes": null,
+        "assets": []
+      },
+      {
+        "block_id": "3f69e28d9631413cb97095dff011a1e1",
+        "name": "proof",
+        "intent": "Provide proof (case studies, testimonials, data).",
+        "body_copy": "Producto/servicio: Acme Pro | Industria: marketing automation",
+        "visual_notes": null,
+        "assets": [
+          {
+            "asset_id": "7d53486239164320b1d47bcf81043c6d",
+            "asset_kind": "image_job",
+            "label": "instagram_post / variant A",
+            "filename_hint": "acme-bootstrapped--instagram_post--A.png",
+            "notes": null
+          },
+          {
+            "asset_id": "3ced12eb9fec46fd9ec4e16ff4252b96",
+            "asset_kind": "image_job",
+            "label": "instagram_post / variant B",
+            "filename_hint": "acme-bootstrapped--instagram_post--B.png",
+            "notes": null
+          },
+          {
+            "asset_id": "3a3f077dfe7444349e00eb439ed17cc4",
+            "asset_kind": "image_job",
+            "label": "instagram_story / variant A",
+            "filename_hint": "acme-bootstrapped--instagram_story--A.png",
+            "notes": null
+          },
+          {
+            "asset_id": "90763addf9dc48d6b8832123699fe1a4",
+            "asset_kind": "image_job",
+            "label": "instagram_story / variant B",
+            "filename_hint": "acme-bootstrapped--instagram_story--B.png",
+            "notes": null
+          }
+        ]
+      },
+      {
+        "block_id": "750eb7bdf7ba45158c5d0c01f8216f1c",
+        "name": "cta",
+        "intent": "Close with a clear next-step CTA.",
+        "body_copy": "Solicitar demo",
+        "visual_notes": null,
+        "assets": []
+      }
+    ],
+    "visual_style_notes": "Primary palette: #0F172A, #22D3EE, #F8FAFC | Accent palette: #F472B6 | Composition: Regla de tercios para sujetos.; Anclaje de copy en zonas seguras del canal.; Aire alrededor del CTA — nunca apretado al borde. | Do use: Fotografía editorial con personas reales del público.; Paleta sobria con un acento sharp.; Tipografía decisiva. | Do NOT use: Handshakes corporativos stock.; Gradientes púrpura/teal genéricos.; Clip-art e iconografía decorativa.; Caras simétricas con manos deformes (IA sin curar).",
+    "reference_links": [],
+    "seo_geo": {
+      "primary_keyword": null,
+      "secondary_keywords": [],
+      "target_locations": [],
+      "title_tag_hint": null,
+      "meta_description_hint": null,
+      "schema_org_types": []
+    },
+    "constraints": [
+      "Respect the upstream approval pack.",
+      "Do not introduce content beyond what the strategy report and creative pack approve."
+    ],
+    "acceptance_criteria": [
+      "Each block has a clear heading and supporting copy.",
+      "Visual style matches the upstream visual pack.",
+      "SEO hints respected."
+    ]
+  },
+  "strategy_report_id": "e4cb47933382440692b8906b46dd63f3",
+  "creative_pack_id": "0acd2c24023747b090b446883ccdefed",
+  "visual_pack_id": "27cafca263ea44fc88815f9261fea6d4",
+  "approval_pack_id": "950a4383255144138d733cba22dc409a",
+  "image_job_pack_id": "5df48d70add94c3487a0a70046443a62",
+  "blocks_publish": false,
+  "notes": null,
+  "created_at": "2026-06-05T16:24:19.764827Z",
+  "rule_set_id": "atlas-bridge.v1"
+}

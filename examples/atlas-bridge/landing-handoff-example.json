@@ -1,0 +1,118 @@
+{
+  "contract_version": "atlas-handoff-brief.v1",
+  "handoff_id": "49a60679970a4ac3877807dd972ecb5d",
+  "client_slug": "acme-bootstrapped",
+  "kind": "landing",
+  "landing_brief": {
+    "contract_version": "landing-brief.v1",
+    "brief_id": "80dfe8747f874b42bc2e1a541e0188f0",
+    "page_objective": "Landing page to support the campaign `acme-bootstrapped` — drive solicitar demo as the primary conversion.",
+    "target_audience": "Fundadores de SaaS bootstrapped en LATAM, equipos de 1-5 personas, sin capital... | Pain points: Falta de tiempo, Sobrecarga informativa | Desired outcomes: Lograr qualified trials",
+    "primary_cta_label": "Solicitar demo",
+    "secondary_cta_label": null,
+    "sections": [
+      {
+        "section_id": "50c2593122a1489992303ae5b57c5ca2",
+        "name": "hero",
+        "objective": "Attention + value proposition in one screen.",
+        "body_copy": "Acme Bootstrapped: campaña 10 semanas para Fundadores de SaaS bootstrapped en LATAM, equipos de 1-5 personas, sin capital... con foco en qualified_trials.",
+        "visual_notes": null,
+        "assets": [
+          {
+            "asset_id": "7d53486239164320b1d47bcf81043c6d",
+            "asset_kind": "image_job",
+            "label": "instagram_post / variant A",
+            "filename_hint": "acme-bootstrapped--instagram_post--A.png",
+            "notes": null
+          },
+          {
+            "asset_id": "3ced12eb9fec46fd9ec4e16ff4252b96",
+            "asset_kind": "image_job",
+            "label": "instagram_post / variant B",
+            "filename_hint": "acme-bootstrapped--instagram_post--B.png",
+            "notes": null
+          }
+        ],
+        "cta_label": "Solicitar demo",
+        "cta_target": null
+      },
+      {
+        "section_id": "fbab6fef78e6492da26694321e1bd58b",
+        "name": "value_proposition",
+        "objective": "Three pillars that back the hero promise.",
+        "body_copy": "Acme Pro: equipos para resolver falta de tiempo. | suite de automatización de marketing para equipos chicos | Differentiators: suite de automatización de marketing para equipos chicos, Resuelve un dolor concreto: Falta de tiempo, Acme Pro — suite de automatización de marketing para equipos chicos\n\nEl cliente prefiere foco en Spanish LATAM y voz del fundador, Mide impacto contra: Generar 150 trials calificados por mes en LATAM en el próximo trimestre, Setup en menos de un día",
+        "visual_notes": null,
+        "assets": [],
+        "cta_label": null,
+        "cta_target": null
+      },
+      {
+        "section_id": "14f9f59ed65a41cdb5aa4a17d955773c",
+        "name": "proof",
+        "objective": "Show traction (case studies, testimonials).",
+        "body_copy": "Producto/servicio: Acme Pro | Industria: marketing automation",
+        "visual_notes": null,
+        "assets": [
+          {
+            "asset_id": "3a3f077dfe7444349e00eb439ed17cc4",
+            "asset_kind": "image_job",
+            "label": "instagram_story / variant A",
+            "filename_hint": "acme-bootstrapped--instagram_story--A.png",
+            "notes": null
+          },
+          {
+            "asset_id": "90763addf9dc48d6b8832123699fe1a4",
+            "asset_kind": "image_job",
+            "label": "instagram_story / variant B",
+            "filename_hint": "acme-bootstrapped--instagram_story--B.png",
+            "notes": null
+          }
+        ],
+        "cta_label": null,
+        "cta_target": null
+      },
+      {
+        "section_id": "ea4ff689155a4263b1449c8396592700",
+        "name": "cta",
+        "objective": "Close with the primary conversion.",
+        "body_copy": "Solicitar demo",
+        "visual_notes": null,
+        "assets": [],
+        "cta_label": "Solicitar demo",
+        "cta_target": null
+      }
+    ],
+    "visual_style_notes": "Primary palette: #0F172A, #22D3EE, #F8FAFC | Accent palette: #F472B6 | Composition: Regla de tercios para sujetos.; Anclaje de copy en zonas seguras del canal.; Aire alrededor del CTA — nunca apretado al borde. | Do use: Fotografía editorial con personas reales del público.; Paleta sobria con un acento sharp.; Tipografía decisiva. | Do NOT use: Handshakes corporativos stock.; Gradientes púrpura/teal genéricos.; Clip-art e iconografía decorativa.; Caras simétricas con manos deformes (IA sin curar).",
+    "reference_links": [],
+    "seo_geo": {
+      "primary_keyword": null,
+      "secondary_keywords": [],
+      "target_locations": [],
+      "title_tag_hint": null,
+      "meta_description_hint": null,
+      "schema_org_types": []
+    },
+    "constraints": [
+      "Respect the upstream approval pack — do not ship while `blocks_publish=True` on the source packs.",
+      "Do not invent claims not present in the strategy report or approved creative."
+    ],
+    "acceptance_criteria": [
+      "Hero copy matches the approved creative verbatim.",
+      "Primary CTA label matches the approved CTA.",
+      "Mobile + desktop layouts validated against the visual style notes.",
+      "SEO title + meta description respect the provided hints.",
+      "No external assets are inlined — only references the agency provides."
+    ]
+  },
+  "branding_brief": null,
+  "page_design_brief": null,
+  "strategy_report_id": "e4cb47933382440692b8906b46dd63f3",
+  "creative_pack_id": "0acd2c24023747b090b446883ccdefed",
+  "visual_pack_id": "27cafca263ea44fc88815f9261fea6d4",
+  "approval_pack_id": "950a4383255144138d733cba22dc409a",
+  "image_job_pack_id": "5df48d70add94c3487a0a70046443a62",
+  "blocks_publish": false,
+  "notes": null,
+  "created_at": "2026-06-05T16:24:18.707747Z",
+  "rule_set_id": "atlas-bridge.v1"
+}

@@ -1497,3 +1497,47 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-7B
 - **Why deferred:** Compare this plan against the previous one ("OpenAI dropped after a pricing update — re-score"). Requires historical recommendation packs.
 - **Resolves at:** when operators ask for provider-stability tracking.
+
+---
+
+## From MKT-8A (alpha pilot readiness + ATLAS bridge contract)
+
+### P-8A.1 — Real ATLAS execution
+- **Introduced:** MKT-8A
+- **Why deferred:** MKT-8A is intentionally read-only over ATLAS. The operator copies briefs manually. A future block (likely MKT-8B) can add an opt-in `mkt atlas-execute` that POSTs the brief to a real ATLAS endpoint with idempotence + audit.
+- **Resolves at:** when ATLAS exposes a stable ingestion API.
+
+### P-8A.2 — Per-tenant overrides for bridge defaults
+- **Introduced:** MKT-8A
+- **Why deferred:** The factory currently builds one auto-generated section list per landing (hero → value_prop → proof → cta) and one default block list per page design. A future block can load `<root>/<client>/atlas-bridge-config.json` with per-tenant overrides.
+- **Resolves at:** when a tenant hits the default-template ceiling.
+
+### P-8A.3 — Handoff validation pass
+- **Introduced:** MKT-8A
+- **Why deferred:** Today validation = Pydantic. A future linter could enforce richer rules ("acceptance criteria must mention measurable outcomes", "every section must reference at least one asset"). Useful when ATLAS returns false positives in QA.
+- **Resolves at:** when operators ask for richer checks at handoff time.
+
+### P-8A.4 — Real landing MVP / portal MVP
+- **Introduced:** MKT-8A
+- **Why deferred:** No landing is generated in this block. A future MKT-9A could ship a minimal portal that hosts the handoff briefs as a read-only operator dashboard — still not generating the landing itself.
+- **Resolves at:** with the post-pilot retrospective.
+
+### P-8A.5 — `_alpha_pilot_notes` strict-mode validator
+- **Introduced:** MKT-8A
+- **Why deferred:** The intake template's safety flags are advisory. A future `mkt intake --strict-alpha-pilot` could refuse to proceed when any flag is `true`.
+- **Resolves at:** before the second real pilot.
+
+### P-8A.6 — ATLAS round-trip capture
+- **Introduced:** MKT-8A
+- **Why deferred:** Today the operator captures ATLAS's response in their own log. A future block can persist `atlas_handoff_response/current.json` so the audit trail closes the loop.
+- **Resolves at:** with P-8A.1.
+
+### P-8A.7 — Native `atlas_handoff_brief.v1` audit envelope
+- **Introduced:** MKT-8A
+- **Why deferred:** Events wrapped in `note` with `payload.atlas_handoff_brief.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-8A.8 — Localised brief output
+- **Introduced:** MKT-8A
+- **Why deferred:** Markdown labels are in English; the body copy honours the client locale because it comes verbatim from the strategy report. A future block can localise the section headers / banner text per `intake.locale`.
+- **Resolves at:** when a non-English-speaking ATLAS team needs the brief in their language.
