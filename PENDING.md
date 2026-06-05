@@ -1458,3 +1458,42 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-7A
 - **Why deferred:** Mirrors the MKT-6H pattern. Opt-in flag on `mkt build-tasks --include-image-jobs` could fold each ready job into the operational task pack as a "generate image" task assigned to a designer / provider operator.
 - **Resolves at:** future block.
+
+---
+
+## From MKT-7B (image provider selection & dry run)
+
+### P-7B.1 — Per-tenant override of provider profiles
+- **Introduced:** MKT-7B
+- **Why deferred:** Today `DEFAULT_PROVIDER_PROFILES` is a module constant. Different tenants prefer different providers (cost / brand / agency template). A `<root>/<client>/image-providers-config.json` could override per-provider scores and cost estimates.
+- **Resolves at:** when an operator hits a tenant-baseline mismatch.
+
+### P-7B.2 — Per-job cost adjusted for dimensions + variants count
+- **Introduced:** MKT-7B
+- **Why deferred:** Today the cost estimate is the provider's flat per-image price. Real cost depends on dimensions × variants count × pricing tier. Requires per-provider price tables.
+- **Resolves at:** when integrated providers ship (with MKT-7C).
+
+### P-7B.3 — Live provider availability check
+- **Introduced:** MKT-7B
+- **Why deferred:** Would require HTTP — explicitly forbidden in MKT-7B. A future block can probe each provider's health endpoint and downgrade the score if degraded.
+- **Resolves at:** with MKT-7C.
+
+### P-7B.4 — Per-tenant override of weight overlays
+- **Introduced:** MKT-7B
+- **Why deferred:** Today `_PIECE_TYPE_WEIGHT_OVERLAYS` is a module constant. Per-tenant overrides could be loaded alongside provider profiles (P-7B.1).
+- **Resolves at:** with P-7B.1.
+
+### P-7B.5 — Real provider integration with `generated` status
+- **Introduced:** MKT-7B
+- **Why deferred:** The entire point of MKT-7B is to ship the analysis + dry-run WITHOUT touching any provider. A separate block (MKT-7C) will implement one or more adapters (opt-in, idempotent, feature-flagged) and emit a real "generated" status with the asset URI.
+- **Resolves at:** with MKT-7C.
+
+### P-7B.6 — Native `image_provider_recommendation_pack.v1` audit envelope
+- **Introduced:** MKT-7B
+- **Why deferred:** Events wrapped in `note` with `payload.image_provider_recommendation_pack.{action, ...}`. Same trade-off as every previous block.
+- **Resolves at:** bundled with the next audit-trail bump.
+
+### P-7B.7 — Cross-pack diff vs previous plan
+- **Introduced:** MKT-7B
+- **Why deferred:** Compare this plan against the previous one ("OpenAI dropped after a pricing update — re-score"). Requires historical recommendation packs.
+- **Resolves at:** when operators ask for provider-stability tracking.

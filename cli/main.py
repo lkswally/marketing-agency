@@ -1408,6 +1408,66 @@ def _cmd_image_jobs(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_image_provider_plan(args: argparse.Namespace, *, out) -> int:
+    """Score image providers + emit a dry-run preview per job (MKT-7B).
+
+    Reads the persisted ImageGenerationJobPack (MKT-7A), evaluates
+    every candidate provider against weighted criteria, picks one
+    per job (fallback `manual`) and writes a per-job dry-run
+    receipt — the simulated request *shape* a future integration
+    block would send.
+
+    NO HTTP. NO SDK import. NO credential read. NO image generation.
+
+    Exit codes:
+    - 0 on success
+    - 2 when there is no ImageGenerationJobPack for the client
+    """
+    from core.image_provider_plan import (
+        ImageProviderPlanner,
+        render_markdown_provider_plan,
+    )
+    from core.memory import JsonFileMemory
+
+    memory = JsonFileMemory(Path(args.root))
+    planner = ImageProviderPlanner(memory=memory)
+    try:
+        pack = planner.plan(args.client)
+    except ValueError as e:
+        print(f"error: {e}", file=out)
+        return 2
+    planner.persist(pack)
+
+    outputs_dir = Path(args.outputs_dir)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path = outputs_dir / "image-provider-plan.md"
+    md_path.write_text(render_markdown_provider_plan(pack), encoding="utf-8")
+    json_path = outputs_dir / "image-provider-plan.json"
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "job_pack_id": pack.job_pack_id,
+        "blocks_publish": pack.blocks_publish,
+        "stats": {
+            "total_jobs": pack.stats.total_jobs,
+            "by_recommended_provider": pack.stats.by_recommended_provider,
+            "by_dry_run_status": pack.stats.by_dry_run_status,
+            "overrode_job_suggestion": pack.stats.overrode_job_suggestion,
+            "skipped_blocked": pack.stats.skipped_blocked,
+            "skipped_manual": pack.stats.skipped_manual,
+            "total_estimated_cost_usd": pack.stats.total_estimated_cost_usd,
+        },
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+        "rule_set_id": pack.rule_set_id,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     """Read a client intake JSON, validate it, and produce a StrategyInputBrief.
 
@@ -2153,6 +2213,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the image jobs MD/JSON are written",
     )
     p_imgj.set_defaults(func=_cmd_image_jobs)
+
+    # image-provider-plan (MKT-7B)
+    p_ipp = subs.add_parser(
+        "image-provider-plan",
+        help=(
+            "score providers + emit dry-run receipts per job. NO "
+            "provider is called, NO image is generated, NO credential "
+            "is read."
+        ),
+    )
+    p_ipp.add_argument("--client", required=True, help="client slug")
+    p_ipp.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_ipp.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where the provider plan MD/JSON are written",
+    )
+    p_ipp.set_defaults(func=_cmd_image_provider_plan)
 
     # intake
     p_in = subs.add_parser(
