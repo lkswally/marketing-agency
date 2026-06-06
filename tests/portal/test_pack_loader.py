@@ -10,7 +10,9 @@ from core.memory import JsonFileMemory
 from portal.pack_loader import PackStatus, load_pack, load_pack_markdown
 from portal.pack_registry import PORTAL_PACK_REGISTRY, PortalPackSpec
 
-_STRATEGY_SPEC = next(s for s in PORTAL_PACK_REGISTRY if s.kind == "strategy")
+_STRATEGY_SPEC = next(
+    s for s in PORTAL_PACK_REGISTRY if s.kind == "campaign_strategy_report"
+)
 _APPROVAL_SPEC = next(
     s for s in PORTAL_PACK_REGISTRY if s.kind == "approval_pack"
 )

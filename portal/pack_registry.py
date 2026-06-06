@@ -32,11 +32,18 @@ class PortalPackSpec:
     order: int
     kind: str
     singleton_id: str
+    """Primary singleton id the loader probes first."""
+
     title: str
     markdown_filenames: tuple[str, ...]
     blocks_publish_field: str | None
     optional: bool
     description: str
+    extra_singleton_ids: tuple[str, ...] = ()
+    """MKT-9B: optional list of additional singleton ids the loader
+    also probes — useful for packs like the ATLAS brief that
+    persist per-kind (``landing`` / ``branding`` / ``page_design``)
+    in addition to the legacy ``current`` slot."""
 
 
 PORTAL_PACK_REGISTRY: tuple[PortalPackSpec, ...] = (
@@ -52,7 +59,7 @@ PORTAL_PACK_REGISTRY: tuple[PortalPackSpec, ...] = (
     ),
     PortalPackSpec(
         order=2,
-        kind="strategy",
+        kind="campaign_strategy_report",
         singleton_id="current",
         title="Campaign strategy",
         markdown_filenames=("campaign-strategy.md",),
@@ -112,7 +119,7 @@ PORTAL_PACK_REGISTRY: tuple[PortalPackSpec, ...] = (
     ),
     PortalPackSpec(
         order=8,
-        kind="n8n_execution_plan",
+        kind="n8n_execution_payload",
         singleton_id="current",
         title="n8n execution plan",
         markdown_filenames=("n8n-execution-plan.md",),
@@ -184,10 +191,10 @@ PORTAL_PACK_REGISTRY: tuple[PortalPackSpec, ...] = (
         optional=True,
         description=(
             "Handoff briefs for ATLAS (landing / branding / "
-            "page_design). The persisted JSON holds the most "
-            "recent one; the outputs directory may hold all three "
-            "Markdown variants."
+            "page_design). Each kind persists separately; "
+            "``current`` mirrors the most recent write."
         ),
+        extra_singleton_ids=("landing", "branding", "page_design"),
     ),
 )
 """Registry consumed by :mod:`portal.app`, the pack loader, and the

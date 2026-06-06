@@ -1,0 +1,88 @@
+{
+  "schema_version": "client-intake.v1",
+  "client_name": "LEXIA",
+  "industry": "legaltech",
+  "market": "AR-LATAM",
+  "product_or_service": "LEXIA — software de gestión legal para abogados y estudios jurídicos: expedientes, vencimientos, tareas, honorarios, seguimiento judicial, informes a clientes y antecedentes.",
+  "product_type": "subscription",
+  "audience_description": "Abogados independientes y estudios jurídicos chicos y medianos (30-55 años) que hoy gestionan con Excel, WhatsApp, carpetas y recordatorios manuales y necesitan orden, seguimiento, trazabilidad y mejor comunicación con clientes.",
+  "commercial_objective": "Generar leads cualificados que pidan una demo comercial de LEXIA en los próximos 90 dias",
+  "brand_tone": [
+    "profesional",
+    "claro",
+    "sobrio",
+    "confiable",
+    "moderno"
+  ],
+  "preferred_words": [
+    "claridad",
+    "orden",
+    "seguimiento",
+    "trazabilidad",
+    "eficiencia",
+    "expedientes",
+    "vencimientos",
+    "clientes",
+    "honorarios",
+    "informes",
+    "gestion legal"
+  ],
+  "forbidden_words": [
+    "revoluciona la justicia",
+    "la IA hace todo",
+    "garantizado",
+    "reemplaza al abogado",
+    "el mejor del mercado",
+    "disruptivo",
+    "sinergia"
+  ],
+  "claim_style": "Profesional y sobrio. Mostrar resultados concretos en eficiencia operativa y orden, no en outcomes judiciales. Nunca prometer exito en juicios. Reforzar trazabilidad y claridad sobre flujos de trabajo del estudio.",
+  "possible_channels": [
+    "linkedin",
+    "instagram",
+    "email",
+    "blog",
+    "landing"
+  ],
+  "known_competitors": [
+    {
+      "name": "Lex Doctor",
+      "url": "https://lexdoctor.example",
+      "notes": "Producto histórico del mercado argentino — instalado en muchos estudios; UX heredada de hace años."
+    },
+    {
+      "name": "Nubijus",
+      "url": "https://nubijus.example",
+      "notes": "Solución cloud con foco en estudios medianos."
+    },
+    {
+      "name": "CaseTracking",
+      "url": "https://casetracking.example",
+      "notes": "Foco en seguimiento de causas; ecosistema regional."
+    },
+    {
+      "name": "Excel / gestion manual",
+      "url": "https://www.microsoft.com/excel",
+      "notes": "El verdadero competidor — la mayoria de estudios chicos vive en planillas y WhatsApp."
+    }
+  ],
+  "budget_estimate": 4000,
+  "budget_currency": "USD",
+  "deadline": "2026-09-30",
+  "duration_weeks": 12,
+  "primary_kpi": "qualified_demo_requests",
+  "locale": "es-AR",
+  "constraints": [
+    "Nunca prometer resultados judiciales ni exito en juicios.",
+    "Nunca posicionar el producto como reemplazo del abogado.",
+    "Mantener tono sobrio y profesional — no usar lenguaje de startup vacia.",
+    "Respetar terminologia juridica argentina (expedientes, vencimientos, honorarios)."
+  ],
+  "claims_to_avoid": [
+    "Garantizamos ganar tu juicio",
+    "Reemplazamos al abogado",
+    "La IA resuelve tus causas",
+    "Software juridico mas completo del mercado",
+    "Revolucionamos la justicia"
+  ]
+}

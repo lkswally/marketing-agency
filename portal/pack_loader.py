@@ -70,30 +70,65 @@ def load_pack(
     client_slug: str,
     spec: PortalPackSpec,
 ) -> PackLoadResult:
-    """Load one pack by registry spec, never raise."""
+    """Load one pack by registry spec, never raise.
+
+    MKT-9B: when ``spec.extra_singleton_ids`` is non-empty, the
+    loader probes the primary singleton first, then each extra
+    singleton. The aggregate status is BLOCKED if ANY loaded
+    payload has a truthy ``blocks_publish_field``; otherwise OK
+    if any singleton loaded; otherwise MISSING.
+    """
 
     memory = JsonFileMemory(Path(root))
-    file_path = _entity_file_path(root, client_slug, spec)
     md_path = _find_markdown(outputs_dir, client_slug, spec)
-    try:
-        data = memory.get(client_slug, spec.kind, spec.singleton_id)
-    except EntityNotFound:
+
+    singletons = (spec.singleton_id, *spec.extra_singleton_ids)
+    primary_data: dict | None = None
+    primary_file_path = _entity_file_path(
+        root, client_slug, spec.kind, spec.singleton_id,
+    )
+    any_loaded = False
+    any_blocked = False
+    last_error: str | None = None
+
+    for sid in singletons:
+        try:
+            data = memory.get(client_slug, spec.kind, sid)
+        except EntityNotFound:
+            continue
+        except Exception as exc:  # noqa: BLE001 — never crash the portal
+            last_error = f"{type(exc).__name__}: {exc}"
+            continue
+        any_loaded = True
+        if primary_data is None:
+            primary_data = data
+            primary_file_path = _entity_file_path(
+                root, client_slug, spec.kind, sid,
+            )
+        if (
+            spec.blocks_publish_field
+            and bool(data.get(spec.blocks_publish_field))
+        ):
+            any_blocked = True
+
+    if not any_loaded:
+        if last_error is not None:
+            return PackLoadResult(
+                spec=spec, status=PackStatus.ERROR,
+                data=None, markdown_path=md_path,
+                file_path=primary_file_path,
+                error_message=last_error,
+            )
         return PackLoadResult(
             spec=spec, status=PackStatus.MISSING,
             data=None, markdown_path=md_path, file_path=None,
         )
-    except Exception as exc:  # noqa: BLE001 — never crash the portal
-        return PackLoadResult(
-            spec=spec, status=PackStatus.ERROR,
-            data=None, markdown_path=md_path, file_path=file_path,
-            error_message=f"{type(exc).__name__}: {exc}",
-        )
-    status = PackStatus.OK
-    if spec.blocks_publish_field and bool(data.get(spec.blocks_publish_field)):
-        status = PackStatus.BLOCKED
+
+    status = PackStatus.BLOCKED if any_blocked else PackStatus.OK
     return PackLoadResult(
         spec=spec, status=status,
-        data=data, markdown_path=md_path, file_path=file_path,
+        data=primary_data, markdown_path=md_path,
+        file_path=primary_file_path,
     )
 
 
@@ -110,12 +145,12 @@ def load_pack_markdown(path: Path) -> str:
 
 
 def _entity_file_path(
-    root: Path | str, client_slug: str, spec: PortalPackSpec,
+    root: Path | str, client_slug: str, kind: str, singleton_id: str,
 ) -> Path:
     """Mirror the JsonFileMemory layout to expose the file path
     even when the pack is MISSING (useful in the UI breadcrumb)."""
     return (
-        Path(root) / client_slug / spec.kind / f"{spec.singleton_id}.json"
+        Path(root) / client_slug / kind / f"{singleton_id}.json"
     )
 
 

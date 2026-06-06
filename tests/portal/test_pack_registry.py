@@ -30,7 +30,7 @@ def test_registry_required_packs_present() -> None:
     required = {s.kind for s in PORTAL_PACK_REGISTRY if not s.optional}
     # Strategy / approval / creative / visual are mandatory for any
     # campaign to be considered ready.
-    assert "strategy" in required
+    assert "campaign_strategy_report" in required
     assert "approval_pack" in required
     assert "creative_asset_pack" in required
     assert "visual_direction_pack" in required
@@ -65,4 +65,5 @@ def test_spec_dataclass_fields() -> None:
         "order", "kind", "singleton_id", "title",
         "markdown_filenames", "blocks_publish_field",
         "optional", "description",
+        "extra_singleton_ids",  # MKT-9B
     }

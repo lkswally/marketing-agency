@@ -110,9 +110,18 @@ def _truncate(text: str, max_len: int) -> str:
 
 def generate_executive_summary(brief: StrategyInputBrief) -> ExecutiveSummary:
     primary_audience = brief.audience_hints[0].label
+    # MKT-9B: weave one preferred word (lexicon_do) into the headline
+    # so the tone of the campaign is set from the first read. Falls
+    # back to a neutral phrase when no preferred word is declared.
+    pref_word = pick_preferred_word(brief.brand.lexicon_do)
+    foco = (
+        f"{pref_word} para {brief.primary_kpi.replace('_', ' ')}"
+        if pref_word
+        else f"foco en {brief.primary_kpi}"
+    )
     headline = (
         f"{brief.client.name}: campaña {brief.duration_weeks} semanas para "
-        f"{primary_audience} con foco en {brief.primary_kpi}."
+        f"{primary_audience} con {foco}."
     )
     one_liner = _truncate(
         f"{brief.product.name} para {primary_audience}: {brief.objective}", 280
@@ -158,10 +167,28 @@ def generate_diagnosis(brief: StrategyInputBrief) -> BusinessDiagnosis:
         challenges.append("Sin propuestas de valor declaradas — se inferirán del objetivo.")
 
     if has_competitors:
-        strengths.append(f"{len(brief.competitors_known)} competidor(es) ya identificados.")
+        # MKT-9B: name the competitors explicitly so downstream
+        # documents (and the operator) see them at a glance.
+        names = ", ".join(c.name for c in brief.competitors_known[:5])
+        strengths.append(
+            f"{len(brief.competitors_known)} competidor(es) ya identificados: "
+            f"{names}."
+        )
     else:
         challenges.append("Sin competidores listados — benchmark será de baja confianza.")
         opportunities.append("Investigar competidores antes de campaña en mercado denso.")
+
+    # MKT-9B: surface the forbidden-words guard so the approval
+    # reviewer can spot violations early. Listed in challenges
+    # because they constrain the copy across every piece.
+    if brief.brand.banned_words:
+        avoid_preview = ", ".join(
+            repr(w) for w in brief.brand.banned_words[:5]
+        )
+        challenges.append(
+            f"Claims/palabras prohibidas declaradas: {avoid_preview}. "
+            "Revisar cada pieza antes de aprobar."
+        )
 
     if has_budget:
         strengths.append(
@@ -350,7 +377,12 @@ def generate_competitor_benchmark(competitors: list[_InputCompetitor]) -> Compet
         CompetitorEntry(
             name=c.name,
             url=c.url,
-            positioning_summary=c.positioning_summary,
+            positioning_summary=c.positioning_summary or (
+                # MKT-9B: fall back to notes when the normalizer did not
+                # extract an explicit positioning summary, so each
+                # competitor entry shows SOMETHING the operator can act on.
+                (c.notes or "")[:280] if c.notes else None
+            ),
             observed_strengths=c.strengths,
             observed_weaknesses=c.weaknesses,
             differentiating_angle_for_us=(
@@ -368,11 +400,15 @@ def generate_competitor_benchmark(competitors: list[_InputCompetitor]) -> Compet
             market_gaps_identified=[],
             confidence="low",
         )
+    # MKT-9B: include competitor names in the takeaway so the read
+    # of the strategy report mentions them at least once.
+    names_preview = ", ".join(e.name for e in entries[:3])
     return CompetitorBenchmark(
         competitors=entries,
         overall_takeaway=(
-            f"{len(entries)} competidor(es) identificados. Ver fortalezas y debilidades por "
-            "competidor para encontrar ángulos diferenciales."
+            f"{len(entries)} competidor(es) identificados ({names_preview}). "
+            "Ver fortalezas y debilidades por competidor para encontrar "
+            "ángulos diferenciales."
         ),
         market_gaps_identified=[
             f"Debilidad común: {w}"
@@ -427,18 +463,97 @@ def generate_channel_recommendation(
         ChannelType.OTHER: ("engagement", "Revisar caso a caso."),
     }
 
+    # MKT-9B: enriched rationale that grounds each channel in the
+    # actual intake — uses the commercial objective, the product
+    # one-liner and a short reason tied to the channel's role,
+    # instead of the previous boilerplate "Match con audiencia (X);
+    # rol esperado: Y." that read identically for every channel.
+    objective_hint = (brief.objective or "").strip()
+    product_hint = (
+        getattr(brief.product, "description", None) or brief.product.name or ""
+    ).strip()
+    per_channel_reason: dict[ChannelType, str] = {
+        ChannelType.LINKEDIN: (
+            "Audiencia profesional B2B donde se construye autoridad y "
+            "se generan demos cualificadas."
+        ),
+        ChannelType.EMAIL: (
+            "Canal directo de conversión y nurture — secuencias 1:1 "
+            "para mover lead a demo."
+        ),
+        ChannelType.NEWSLETTER: (
+            "Owned media de bajo costo para mantener atención entre "
+            "ciclos de compra."
+        ),
+        ChannelType.BLOG: (
+            "SEO de fondo + activos reutilizables para el resto de "
+            "los canales."
+        ),
+        ChannelType.SEO: (
+            "Adquisición orgánica sostenida; complementa los "
+            "esfuerzos owned con descubrimiento de marca."
+        ),
+        ChannelType.INSTAGRAM: (
+            "Soporte para humanizar la marca y mostrar producto "
+            "en contexto; secundario al canal principal."
+        ),
+        ChannelType.X: (
+            "Conversación rápida con la audiencia técnica del nicho; "
+            "amplifica contenido de blog/LinkedIn."
+        ),
+        ChannelType.YOUTUBE: (
+            "Tutoriales y demos extendidas que reducen fricción "
+            "para la conversión."
+        ),
+        ChannelType.PODCAST: (
+            "Tiempo largo con prospectos de alto valor; complementa "
+            "el canal principal."
+        ),
+        ChannelType.TIKTOK: (
+            "Alcance amplio; testear si la audiencia objetivo está "
+            "presente antes de invertir."
+        ),
+        ChannelType.PAID_SEARCH: (
+            "Capturar intent de búsqueda específico, condicionado al "
+            "presupuesto disponible."
+        ),
+        ChannelType.PAID_SOCIAL: (
+            "Retargeting y amplificación del contenido orgánico; "
+            "asignar presupuesto controlado."
+        ),
+        ChannelType.FACEBOOK: (
+            "Audiencia generalista; útil para retargeting pero no "
+            "primario."
+        ),
+        ChannelType.DISPLAY: "Retargeting acotado, no adquisición principal.",
+        ChannelType.PR: "Relaciones públicas esporádicas, no programáticas.",
+        ChannelType.OTHER: "Revisar caso a caso con el equipo de cuenta.",
+    }
+
     entries: list[ChannelEntry] = []
     for i, ch in enumerate(ordered):
         role, cadence = role_map.get(ch, ("engagement", None))
+        reason = per_channel_reason.get(
+            ch,
+            f"Match con audiencia ({audience.label}); rol esperado: {role}.",
+        )
+        # Compose: audience fit + role + reason + objective tie-in.
+        rationale_parts = [
+            f"Audiencia: {audience.label}.",
+            f"Rol: {role}.",
+            reason,
+        ]
+        if objective_hint:
+            rationale_parts.append(f"Conecta con: {objective_hint}.")
+        elif product_hint:
+            rationale_parts.append(f"Apoya a: {product_hint}.")
+        rationale = " ".join(rationale_parts)
         entries.append(
             ChannelEntry(
                 channel_type=ch,
                 label=f"{ch.value} (rol: {role})",
                 priority=i + 1,
-                rationale=(
-                    f"Match con audiencia ({audience.label}); "
-                    f"rol esperado: {role}."
-                ),
+                rationale=rationale[:600],
                 cadence_suggestion=cadence,
                 expected_role=role,
             )
@@ -450,13 +565,22 @@ def generate_channel_recommendation(
         if c not in seen
     ]
 
+    # Rationale overall now mentions the top-2 channels by name so
+    # the read is not just "Mix de canales priorizado".
+    top2 = [e.channel_type.value for e in entries[:2]]
+    top2_text = ", ".join(top2) if top2 else "canales seleccionados"
+    overall = (
+        f"Mix priorizado para {audience.label}. "
+        f"Foco inicial en {top2_text}: combinan adquisición y "
+        "conversión con costo controlado. "
+        "Owned (newsletter/blog) sostiene el ciclo; "
+        "paid queda condicionado al presupuesto disponible."
+    )
+
     return ChannelRecommendation(
         channels=entries,
         total_channels=len(entries),
-        rationale_overall=(
-            f"Mix de canales priorizado para {audience.label}, balanceando "
-            "owned (newsletter, blog) y earned (social). Paid queda condicionado a presupuesto."
-        ),
+        rationale_overall=overall[:600],
         out_of_scope_channels=out_of_scope,
     )
 

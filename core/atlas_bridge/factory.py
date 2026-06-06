@@ -125,11 +125,26 @@ class AtlasHandoffFactory:
         )
 
     def persist(self, handoff: AtlasHandoffBrief) -> None:
+        # MKT-9B: persist per-kind so emitting landing then branding
+        # then page_design does NOT overwrite the previous brief. The
+        # singleton id is the kind value (``"landing"`` /
+        # ``"branding"`` / ``"page_design"``). The legacy
+        # ``"current"`` singleton is also written so the most-recent
+        # write remains easy to find (matches MKT-8A behaviour for
+        # backward compat with anything that reads ``current.json``
+        # by name).
+        payload = handoff.model_dump(mode="json")
+        self._memory.put(
+            handoff.client_slug,
+            ATLAS_HANDOFF_BRIEF_KIND,
+            handoff.kind.value,
+            payload,
+        )
         self._memory.put(
             handoff.client_slug,
             ATLAS_HANDOFF_BRIEF_KIND,
             SINGLETON_ID,
-            handoff.model_dump(mode="json"),
+            payload,
         )
         prev = self._memory.last_audit_hash(handoff.client_slug)
         event = AuditTrailEvent.build(
