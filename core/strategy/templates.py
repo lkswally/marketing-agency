@@ -106,6 +106,218 @@ def _truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[: max_len - 1].rstrip() + "…"
 
 
+# ---------- MKT-9C: domain-aware extraction helpers ----------
+#
+# These helpers stay pure / LLM-free. They look for high-signal
+# substrings in the intake text and turn them into concrete pain
+# phrases. The goal is to stop emitting the legacy "Falta de
+# tiempo" / "Sobrecarga informativa" fallback when the intake
+# carries enough material to do better.
+
+
+# Lower-case anti-pattern tokens we recognise in audience
+# descriptions. When present, they suggest the audience lives in
+# a disjointed manual workflow — a pain we can name explicitly.
+_ANTIPATTERN_TOKENS: tuple[str, ...] = (
+    "excel", "planilla", "planillas",
+    "whatsapp", "wsp",
+    "carpeta", "carpetas",
+    "recordatorio manual", "recordatorios manuales",
+    "manual", "manuales", "manualmente",
+    "papel", "papeles",
+    "mail suelto", "mails sueltos",
+    "post-it", "post it",
+)
+
+# Stop-words inside product feature lists. After splitting the
+# product description at colons / em-dashes, we drop these.
+_FEATURE_STOPWORDS: frozenset[str] = frozenset({
+    "y", "o", "u", "para", "de", "del", "la", "el", "los", "las",
+    "con", "en", "a", "al", "que", "como",
+})
+
+# A small set of "inverse modifiers" used to turn a product feature
+# noun into a pain phrase. The modifier rotates per feature so the
+# final list does not repeat "desordenados" five times.
+_PAIN_INVERSES: tuple[str, ...] = (
+    "desordenados",
+    "sin trazabilidad",
+    "dispersas",
+    "que se pierden",
+    "sin seguimiento",
+    "manuales",
+)
+
+
+def _extract_product_features(brief: StrategyInputBrief) -> list[str]:
+    """Pull a list of concrete features from the product description.
+
+    The intake's ``product_or_service`` is typically a string with a
+    feature list after a colon or em-dash::
+
+        "LEXIA — software de gestión legal para abogados y estudios
+         jurídicos: expedientes, vencimientos, tareas, honorarios,
+         seguimiento judicial, informes a clientes y antecedentes."
+
+    Returns the post-colon feature tokens (``["expedientes",
+    "vencimientos", "tareas", "honorarios", "seguimiento judicial",
+    "informes a clientes", "antecedentes"]``).
+    """
+
+    description = (brief.product.description or "").strip()
+    if not description:
+        return []
+    # The feature list lives after the first ``:`` in real intakes.
+    # If there is no colon, look at the value props list — those
+    # are extracted by the normalizer in the same shape.
+    after_colon = description.split(":", 1)[1] if ":" in description else ""
+    if not after_colon and brief.product.value_props:
+        # The first value_prop usually carries the same feature list.
+        first = brief.product.value_props[0]
+        after_colon = first.split(":", 1)[1] if ":" in first else first
+    if not after_colon:
+        return []
+    # Take the first sentence (period or newline ends the list).
+    chunk = after_colon.split(".", 1)[0].split("\n", 1)[0]
+    raw_features = [f.strip() for f in chunk.replace(" y ", ",").split(",")]
+    features: list[str] = []
+    for f in raw_features:
+        f_clean = f.strip(" .;–—-:")
+        if not f_clean:
+            continue
+        tokens = f_clean.lower().split()
+        # Drop pure-stopword fragments ("y antecedentes" → already
+        # split, but be defensive against odd punctuation).
+        if all(t in _FEATURE_STOPWORDS for t in tokens):
+            continue
+        features.append(f_clean)
+    # Cap so we never blow up the pain list later.
+    return features[:8]
+
+
+def _detect_anti_pattern_tools(brief: StrategyInputBrief) -> list[str]:
+    """Detect manual-workflow tool mentions in the audience
+    description. Returns the unique list of tokens we recognised."""
+
+    descs: list[str] = []
+    for hint in brief.audience_hints:
+        if hint.description:
+            descs.append(hint.description.lower())
+    blob = " ".join(descs)
+    found: list[str] = []
+    for token in _ANTIPATTERN_TOKENS:
+        if token in blob and token not in found:
+            found.append(token)
+    return found
+
+
+def _extract_pains_from_intake(brief: StrategyInputBrief) -> list[str]:
+    """Compose realistic pain phrases for the target audience.
+
+    Priority order:
+
+    1. Explicit ``psychographics["pains"]`` carried through by the
+       normalizer (split on ``|``). When present, those win — the
+       client described them directly.
+    2. Product features turned into "feature + inverse modifier"
+       phrases (``"expedientes desordenados"``).
+    3. Anti-pattern tool mentions in the audience description
+       (``"Gestión dispersa en Excel, WhatsApp y carpetas"``).
+    4. Last-resort generic fallback.
+    """
+
+    hint = brief.audience_hints[0]
+    explicit = [
+        p.strip() for p in
+        hint.psychographics.get("pains", "").split("|")
+        if p.strip()
+    ]
+    if explicit:
+        return explicit[:5]
+
+    pains: list[str] = []
+    # MKT-9C: anti-pattern detection goes first so an LEXIA-shaped
+    # intake (with Excel / WhatsApp / carpetas in the audience
+    # description) ALWAYS gets the synthetic "Procesos dispersos
+    # en ..." pain — that's the most operationally meaningful one
+    # for the operator and ATLAS handoff brief.
+    anti_tools = _detect_anti_pattern_tools(brief)
+    if anti_tools:
+        labelled: list[str] = []
+        if any(t.startswith("excel") or t.startswith("planilla") for t in anti_tools):
+            labelled.append("Excel")
+        if any(t.startswith("whats") or t.startswith("wsp") for t in anti_tools):
+            labelled.append("WhatsApp")
+        if any(t.startswith("carpeta") for t in anti_tools):
+            labelled.append("carpetas")
+        if any("manual" in t for t in anti_tools):
+            labelled.append("recordatorios manuales")
+        if labelled:
+            pains.append("Procesos dispersos en " + ", ".join(labelled[:4]))
+
+    features = _extract_product_features(brief)
+    for i, feature in enumerate(features):
+        if len(pains) >= 5:
+            break
+        # Pick an inverse that does NOT echo a word already in the
+        # feature — avoids "seguimiento judicial sin seguimiento".
+        feature_words = set(feature.lower().split())
+        inverse_candidates = [
+            inv for inv in _PAIN_INVERSES
+            if not any(word in inv.lower() for word in feature_words)
+        ]
+        if not inverse_candidates:
+            inverse_candidates = list(_PAIN_INVERSES)
+        inverse = inverse_candidates[i % len(inverse_candidates)]
+        # Concordancia simple: feminize "desordenados" / "dispersos"
+        # if the feature looks feminine plural (".as"). Cheap and
+        # readable in Spanish.
+        if inverse in ("desordenados", "dispersas", "manuales") and (
+            feature.endswith("as") or feature.endswith("nes")
+        ):
+            inverse = {
+                "desordenados": "desordenadas",
+                "dispersas": "dispersas",
+                "manuales": "manuales",
+            }[inverse]
+        pains.append(f"{feature.capitalize()} {inverse}")
+
+    if pains:
+        return pains[:5]
+    return ["Falta de tiempo", "Sobrecarga informativa"]
+
+
+def _sanitize_forbidden(text: str, banned_words: list[str]) -> str:
+    """Scrub a generated string of phrases the client banned.
+
+    The templated backend has been audited and does NOT currently
+    emit any of LEXIA's forbidden phrases — this helper exists as
+    a safety net for future template changes and downstream LLM
+    backends. It performs a case-insensitive substring replacement
+    leaving ``[REDACTED]`` in place so the operator notices.
+    """
+
+    if not banned_words or not text:
+        return text
+    out = text
+    lower = out.lower()
+    for raw in banned_words:
+        phrase = (raw or "").strip()
+        if not phrase or len(phrase) < 3:
+            continue
+        # find every case-insensitive occurrence
+        idx = 0
+        phrase_l = phrase.lower()
+        while True:
+            pos = lower.find(phrase_l, idx)
+            if pos == -1:
+                break
+            out = out[:pos] + "[REDACTED]" + out[pos + len(phrase):]
+            lower = out.lower()
+            idx = pos + len("[REDACTED]")
+    return out
+
+
 # ---------- Section generators ----------
 
 def generate_executive_summary(brief: StrategyInputBrief) -> ExecutiveSummary:
@@ -222,8 +434,30 @@ def generate_diagnosis(brief: StrategyInputBrief) -> BusinessDiagnosis:
 
 def generate_target_audience(brief: StrategyInputBrief) -> TargetAudience:
     hint = brief.audience_hints[0]
-    pains = list(hint.psychographics.get("pains", "").split("|")) if hint.psychographics.get("pains") else []
     outcomes = list(hint.psychographics.get("desired", "").split("|")) if hint.psychographics.get("desired") else []
+    # MKT-9C: derive realistic pains from the intake. Falls back to
+    # the legacy generic pair only when there is literally nothing
+    # to extract.
+    pains = _extract_pains_from_intake(brief)
+    # MKT-9C: derive desired outcomes from the preferred_words
+    # vocabulary when the intake didn't supply explicit ones —
+    # e.g. for LEXIA the lexicon is ``["claridad","orden",...]``,
+    # which makes a more meaningful outcome list than the legacy
+    # ``"Lograr qualified demo requests"`` echo.
+    if not [o for o in outcomes if o]:
+        if brief.brand.lexicon_do:
+            lexicon_outcomes = [
+                w for w in brief.brand.lexicon_do[:5]
+                if w and len(w) > 2
+            ]
+            outcomes = [
+                w.capitalize() + " operativa"
+                if w in {"orden", "claridad", "trazabilidad", "eficiencia"}
+                else w.capitalize()
+                for w in lexicon_outcomes
+            ] or [f"Lograr {brief.primary_kpi.replace('_', ' ')}"]
+        else:
+            outcomes = [f"Lograr {brief.primary_kpi.replace('_', ' ')}"]
     return TargetAudience(
         audience_id=new_id(),
         label=hint.label,
@@ -233,9 +467,8 @@ def generate_target_audience(brief: StrategyInputBrief) -> TargetAudience:
             k: v for k, v in hint.psychographics.items() if k not in ("pains", "desired")
         },
         preferred_channels=list(hint.preferred_channels) or list(brief.preferred_channels),
-        pain_points=[p for p in pains if p] or ["Falta de tiempo", "Sobrecarga informativa"],
-        desired_outcomes=[o for o in outcomes if o]
-        or [f"Lograr {brief.primary_kpi.replace('_', ' ')}"],
+        pain_points=pains,
+        desired_outcomes=[o for o in outcomes if o],
     )
 
 
@@ -352,7 +585,18 @@ def _compose_value_headline(
     of specificity and returns the first one that actually contains
     intake-derived content."""
     product = brief.product.name
-    pain = (audience.pain_points or [None])[0]
+    # MKT-9C: pick the FIRST extracted pain that is not the legacy
+    # generic fallback. If the audience only carries the fallback
+    # pair (``"Falta de tiempo"`` / ``"Sobrecarga informativa"``),
+    # we still use the first one but the extractor will normally
+    # have produced something better for any real-business intake.
+    pains = list(audience.pain_points or [])
+    legacy_fallback = {"falta de tiempo", "sobrecarga informativa"}
+    non_legacy = [
+        p for p in pains
+        if p and p.strip().lower() not in legacy_fallback
+    ]
+    pain = (non_legacy or pains or [None])[0]
 
     # Form 1: pain-led, with preferred word if available.
     if pain:
@@ -613,6 +857,17 @@ def generate_keyword_plan(
         if industry_slug:
             seeds.append(industry_slug)
 
+    # MKT-9C: seed concrete domain features extracted from the
+    # intake's product description BEFORE differentiator tokens.
+    # For LEXIA these surface as ``expedientes``, ``vencimientos``,
+    # ``honorarios`` etc. — the vocabulary actual prospects search
+    # for, far more valuable than the generic differentiator
+    # tokens.
+    for feature in _extract_product_features(brief)[:5]:
+        slug = normalize_for_slug(feature)
+        if slug and is_meaningful_keyword(slug.split(" ")[0]) and slug not in seeds:
+            seeds.append(slug)
+
     # First meaningful token from each top differentiator — filters out
     # stopwords (``sin``), generic tokens (``setup``), short verbs
     # (``diseado``).
@@ -620,6 +875,14 @@ def generate_keyword_plan(
         tok = first_meaningful_token(d)
         if tok and tok not in seeds:
             seeds.append(tok)
+
+    # MKT-9C: seed every preferred_word that survives the
+    # meaningfulness filter — these are the words the client
+    # explicitly asked the campaign to use.
+    for pref in brief.brand.lexicon_do[:6]:
+        slug = normalize_for_slug(pref)
+        if slug and is_meaningful_keyword(slug.split(" ")[0]) and slug not in seeds:
+            seeds.append(slug)
 
     # Audience first meaningful token, or product slug as fallback.
     audience_token = (
@@ -852,11 +1115,12 @@ def generate_social_post_drafts(
     product = brief.product.name
     persona_token = brief.audience_hints[0].label.lower()
     topic = brief.client.industry or "esto"
-    pain_token = (
-        brief.audience_hints[0].psychographics.get("pains", "tareas repetitivas").split("|")[0]
-        if brief.audience_hints[0].psychographics.get("pains")
-        else "tareas repetitivas"
-    )
+    # MKT-9C: use the same intake-aware pain extractor as
+    # ``generate_target_audience`` so social posts and the
+    # ``pain_points`` field in the audience speak about the same
+    # concrete problem (no more boilerplate "tareas repetitivas").
+    extracted_pains = _extract_pains_from_intake(brief)
+    pain_token = extracted_pains[0].lower() if extracted_pains else "tareas repetitivas"
     diff = value_prop.differentiators[0] if value_prop.differentiators else "Te ahorra tiempo"
 
     # Tone-aware connector + adjective, picked once per run.
@@ -1029,9 +1293,11 @@ def generate_reels_script_pack(
     # ungrammatical voiceover when diffs[0] was a noun phrase
     # ("Diseñado específicamente para X"). The new line is a
     # complete sentence regardless of differentiator shape.
+    # MKT-9C: prefer the audience-derived pain (which now uses
+    # the intake-aware extractor) over the legacy stub.
     pain_token = (
-        brief.audience_hints[0].psychographics.get("pains", "").split("|")[0]
-        if brief.audience_hints and brief.audience_hints[0].psychographics.get("pains")
+        audience.pain_points[0].lower()
+        if audience.pain_points
         else "lo mismo de siempre"
     )
     pref_word = pick_preferred_word(brief.brand.lexicon_do)
