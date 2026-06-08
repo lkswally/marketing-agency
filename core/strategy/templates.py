@@ -52,9 +52,10 @@ from .style import (
     is_meaningful_keyword,
     make_hashtag,
     pick_preferred_word,
-    tone_adjective,
-    tone_connector,
-    tone_opener,
+    tone_adjective_for_brief,
+    tone_connector_for_brief,
+    tone_family_for_brief,
+    tone_opener_for_brief,
 )
 
 # ---------- Constants ----------
@@ -1123,48 +1124,104 @@ def generate_social_post_drafts(
     pain_token = extracted_pains[0].lower() if extracted_pains else "tareas repetitivas"
     diff = value_prop.differentiators[0] if value_prop.differentiators else "Te ahorra tiempo"
 
-    # Tone-aware connector + adjective, picked once per run.
-    adjective = tone_adjective(brief.brand.tone_words)
-    connector = tone_connector(brief.brand.tone_words)
+    # MKT-9D: pick tone family from the BRIEF (industry +
+    # audience), not just brand.tone_words. For legal /
+    # legaltech intakes the system now switches to the
+    # ``legal-pro`` family which carries sober adjectives,
+    # connectors and openers — no more "decisiones claros que
+    # tomamos esta semana" startup-genérica.
+    family = tone_family_for_brief(brief)
+    adjective = tone_adjective_for_brief(brief)
+    connector = tone_connector_for_brief(brief)
 
     # Channel-specific copy. Each channel gets its OWN hook + body so
     # the output stops being a template echo across 3+ surfaces.
-    channel_voices: dict[str, tuple[str, str, str]] = {
-        # channel_value: (hook_template, body_template, cta)
-        "newsletter": (
-            "Esta semana, un experimento {adjective}: {pain} sin la opción de siempre.",
-            "Lo que probamos: usar {product} para algo {adjective} que veníamos posponiendo. "
-            "{connector}, {diff}. Te dejamos el detalle abajo — un caso, dos números, una decisión.",
-            "Leer el caso →",
-        ),
-        "blog": (
-            "Cómo hicimos {topic} sin {pain}: un walkthrough.",
-            "Documentamos paso por paso. Stack, decisiones, los puntos donde nos equivocamos. "
+    # MKT-9D: when the family is ``legal-pro`` we substitute the
+    # SaaS-flavoured templates with sober versions per channel.
+    if family == "legal-pro":
+        channel_voices: dict[str, tuple[str, str, str]] = {
+            # channel_value: (hook_template, body_template, cta)
+            "newsletter": (
+                "Cómo evitar {pain} en el estudio.",
+                "Resumen breve para el estudio: usar {product} para "
+                "ordenar lo que hoy vive en {pain}. {connector}, {diff}.",
+                "Leer el caso",
+            ),
+            "blog": (
+                "Cómo ordenar {topic} en el estudio sin {pain}.",
+                "Documentamos paso por paso lo que cambia en la "
+                "operación del estudio. {connector}, {diff}.",
+                "Leer el informe",
+            ),
+            "linkedin": (
+                "3 cambios concretos en la operación de un estudio "
+                "jurídico con {product}.",
+                "{connector}, lo comparto con detalle: qué ordenamos, "
+                "qué dejó de perderse, qué quedó trazable. {diff}.",
+                "Ver el detalle",
+            ),
+            "x": (
+                "{product}: {short_diff}.",
+                "Para {persona} que necesitan {pain} bajo control. "
+                "{connector}, así lo planteamos.",
+                "Ver más",
+            ),
+            "instagram": (
+                "Un estudio jurídico puede dejar de operar a oscuras.",
+                "Carrusel con un caso concreto: qué cambió en la "
+                "operación. {connector}, {diff}.",
+                "Ver carrusel",
+            ),
+            "email": (
+                "Cómo evitar {pain} sin sumar carga al estudio.",
+                "Caso breve: el estudio que ordenó {pain} en una "
+                "semana. {connector}, {diff}.",
+                "Pedir demo",
+            ),
+        }
+        default_voice = (
+            "{product} para el estudio jurídico: lo que cambia en la "
+            "práctica.",
             "{connector}, {diff}.",
-            "Leer el post →",
-        ),
-        "linkedin": (
-            "3 decisiones {adjective}s que tomamos esta semana en {product}.",
-            "{connector}, las comparto sin filtro: qué probamos, qué descartamos, "
-            "qué dejamos andando. {diff}.",
-            "Ver el detalle →",
-        ),
-        "x": (
-            "{product}, en {short_diff}.",
-            "Para {persona} que se cansaron de {pain}. {connector}, así lo armamos.",
-            "Mirá →",
-        ),
-        "instagram": (
-            "El problema no era la herramienta. Era cómo la usábamos.",
-            "Carrusel con la decisión, el cambio y el resultado. {connector}, {diff}.",
-            "Ver carrusel →",
-        ),
-    }
-    default_voice = (
-        "{product}: lo que probamos esta semana.",
-        "{connector}, {diff}.",
-        "Conocé cómo →",
-    )
+            "Pedir demo",
+        )
+    else:
+        channel_voices = {
+            # channel_value: (hook_template, body_template, cta)
+            "newsletter": (
+                "Esta semana, un experimento {adjective}: {pain} sin la opción de siempre.",
+                "Lo que probamos: usar {product} para algo {adjective} que veníamos posponiendo. "
+                "{connector}, {diff}. Te dejamos el detalle abajo — un caso, dos números, una decisión.",
+                "Leer el caso →",
+            ),
+            "blog": (
+                "Cómo hicimos {topic} sin {pain}: un walkthrough.",
+                "Documentamos paso por paso. Stack, decisiones, los puntos donde nos equivocamos. "
+                "{connector}, {diff}.",
+                "Leer el post →",
+            ),
+            "linkedin": (
+                "3 decisiones {adjective}s que tomamos esta semana en {product}.",
+                "{connector}, las comparto sin filtro: qué probamos, qué descartamos, "
+                "qué dejamos andando. {diff}.",
+                "Ver el detalle →",
+            ),
+            "x": (
+                "{product}, en {short_diff}.",
+                "Para {persona} que se cansaron de {pain}. {connector}, así lo armamos.",
+                "Mirá →",
+            ),
+            "instagram": (
+                "El problema no era la herramienta. Era cómo la usábamos.",
+                "Carrusel con la decisión, el cambio y el resultado. {connector}, {diff}.",
+                "Ver carrusel →",
+            ),
+        }
+        default_voice = (
+            "{product}: lo que probamos esta semana.",
+            "{connector}, {diff}.",
+            "Conocé cómo →",
+        )
 
     short_diff = _truncate(diff, 60)
 
@@ -1206,72 +1263,167 @@ def generate_email_sequence(
 ) -> EmailSequenceDraft:
     product = brief.product.name
     diffs = value_prop.differentiators or [value_prop.headline]
-    opener = tone_opener(brief.brand.tone_words)
+    # MKT-9D: pick the opener from the FAMILY-aware helper so legal
+    # / legaltech intakes get "En la práctica del estudio:" instead
+    # of "Concretamente:".
+    family = tone_family_for_brief(brief)
+    opener = tone_opener_for_brief(brief)
     pref1 = pick_preferred_word(brief.brand.lexicon_do)
     pref2 = pick_preferred_word(brief.brand.lexicon_do, already_used=[pref1] if pref1 else [])
     objective = brief.objective
 
     pref1_phrase = f" ({pref1})" if pref1 else ""
 
-    emails: list[EmailDraft] = [
-        EmailDraft(
-            email_id=new_id(),
-            step=1,
-            subject=_truncate(f"Bienvenida a {product}", 80),
-            preview_text=_truncate("Empezamos por lo más importante.", 140),
-            body=(
-                f"Hola,\n\nGracias por sumarte a {product}.\n\n"
-                f"{opener} este recorrido apunta a un objetivo concreto: {objective}{pref1_phrase}.\n\n"
-                "Empezá por acá: revisá la guía de setup (5 min).\n\nAbrazo,\nEl equipo"
+    if family == "legal-pro":
+        emails: list[EmailDraft] = [
+            EmailDraft(
+                email_id=new_id(),
+                step=1,
+                subject=_truncate(f"Bienvenida a {product}", 80),
+                preview_text=_truncate(
+                    "Para que el estudio empiece con orden.", 140,
+                ),
+                body=(
+                    f"Estimado/a,\n\nGracias por sumarte a {product}.\n\n"
+                    f"{opener} esta secuencia te orienta hacia un objetivo "
+                    f"concreto: {objective}{pref1_phrase}.\n\n"
+                    "Primer paso recomendado: revisar la guía de setup "
+                    "(5 minutos).\n\nUn saludo,\nEl equipo de "
+                    f"{product}"
+                ),
+                cta="Ver guía de setup",
+                send_after_days=0,
             ),
-            cta="Ver guía de setup",
-            send_after_days=0,
-        ),
-        EmailDraft(
-            email_id=new_id(),
-            step=2,
-            subject=_truncate(f"3 cosas que {product} hace distinto", 80),
-            preview_text=_truncate("Lo que cambia respecto al status quo.", 140),
-            body=(
-                "Hola,\n\n"
-                + (f"{opener} " if opener else "")
-                + (f"resumido en una palabra: {pref2}.\n\n" if pref2 else "")
-                + f"Tres puntos donde {product} cambia el statu quo:\n\n"
-                + "\n".join(f"• {d}" for d in diffs[:3])
-                + "\n\nSi querés, lo charlamos en 15 minutos.\n\nAbrazo"
+            EmailDraft(
+                email_id=new_id(),
+                step=2,
+                subject=_truncate(
+                    f"3 puntos donde {product} ordena la operación", 80,
+                ),
+                preview_text=_truncate(
+                    "Qué cambia para el estudio en la práctica.", 140,
+                ),
+                body=(
+                    "Estimado/a,\n\n"
+                    + (f"{opener} " if opener else "")
+                    + (
+                        f"resumido en una palabra: {pref2}.\n\n"
+                        if pref2 else ""
+                    )
+                    + f"Tres puntos donde {product} ordena la operación "
+                    "del estudio:\n\n"
+                    + "\n".join(f"• {d}" for d in diffs[:3])
+                    + "\n\nSi te interesa verlo aplicado a tu estudio, "
+                    "coordinemos una demo de 20 minutos.\n\nUn saludo"
+                ),
+                cta="Reservar demo",
+                send_after_days=2,
             ),
-            cta="Agendar 15 min",
-            send_after_days=2,
-        ),
-        EmailDraft(
-            email_id=new_id(),
-            step=3,
-            subject=_truncate("Cómo lo usaron otros equipos", 80),
-            preview_text=_truncate("Casos reales — sin maquillaje.", 140),
-            body=(
-                "Hola,\n\nUn par de casos rápidos de cómo otros equipos usan "
-                f"{product}.\n\n[Insertar 2 casos cortos — pending para revisión humana.]\n\n"
-                "Si querés ver más casos, escribime a este email.\n\nAbrazo"
+            EmailDraft(
+                email_id=new_id(),
+                step=3,
+                subject=_truncate(
+                    "Cómo lo usan otros estudios jurídicos", 80,
+                ),
+                preview_text=_truncate(
+                    "Casos breves — para que veas el impacto en la práctica.",
+                    140,
+                ),
+                body=(
+                    "Estimado/a,\n\nDos casos breves de estudios que ya "
+                    f"usan {product}.\n\n"
+                    "[Insertar 2 casos reales — pendiente de revisión "
+                    "humana antes de enviar.]\n\n"
+                    "Si querés ver más casos del estudio que te "
+                    "interesa, respondeme a este correo.\n\nUn saludo"
+                ),
+                cta="Ver casos",
+                send_after_days=5,
             ),
-            cta="Ver más casos",
-            send_after_days=5,
-        ),
-        EmailDraft(
-            email_id=new_id(),
-            step=4,
-            subject=_truncate("Tu próximo paso con " + product, 80),
-            preview_text=_truncate("Sin presión — y un descuento si te suma.", 140),
-            body=(
-                f"Hola,\n\nDespués de esta semana con {product} probablemente ya tengas "
-                "una idea clara de si te suma o no.\n\n"
-                "Si querés avanzar, te dejamos un descuento por activación esta semana.\n\n"
-                "Si no, no pasa nada — quedamos a la mano cuando lo necesites.\n\n"
-                "Gracias por haber leído hasta acá.\n\nAbrazo"
+            EmailDraft(
+                email_id=new_id(),
+                step=4,
+                subject=_truncate(
+                    f"Próximo paso con {product}", 80,
+                ),
+                preview_text=_truncate(
+                    "Sin presión — un acuerdo de activación si te suma.",
+                    140,
+                ),
+                body=(
+                    f"Estimado/a,\n\nTras esta semana con {product} "
+                    "probablemente ya tengas claridad sobre si te suma "
+                    "para la operación del estudio.\n\n"
+                    "Si querés avanzar, podemos coordinar un acuerdo "
+                    "de activación para esta semana.\n\n"
+                    "Si todavía no es el momento, sin problema — "
+                    "quedamos a disposición.\n\n"
+                    "Gracias por leer hasta acá.\n\nUn saludo"
+                ),
+                cta="Coordinar activación",
+                send_after_days=10,
             ),
-            cta="Activar con descuento",
-            send_after_days=10,
-        ),
-    ]
+        ]
+    else:
+        emails = [
+            EmailDraft(
+                email_id=new_id(),
+                step=1,
+                subject=_truncate(f"Bienvenida a {product}", 80),
+                preview_text=_truncate("Empezamos por lo más importante.", 140),
+                body=(
+                    f"Hola,\n\nGracias por sumarte a {product}.\n\n"
+                    f"{opener} este recorrido apunta a un objetivo concreto: {objective}{pref1_phrase}.\n\n"
+                    "Empezá por acá: revisá la guía de setup (5 min).\n\nAbrazo,\nEl equipo"
+                ),
+                cta="Ver guía de setup",
+                send_after_days=0,
+            ),
+            EmailDraft(
+                email_id=new_id(),
+                step=2,
+                subject=_truncate(f"3 cosas que {product} hace distinto", 80),
+                preview_text=_truncate("Lo que cambia respecto al status quo.", 140),
+                body=(
+                    "Hola,\n\n"
+                    + (f"{opener} " if opener else "")
+                    + (f"resumido en una palabra: {pref2}.\n\n" if pref2 else "")
+                    + f"Tres puntos donde {product} cambia el statu quo:\n\n"
+                    + "\n".join(f"• {d}" for d in diffs[:3])
+                    + "\n\nSi querés, lo charlamos en 15 minutos.\n\nAbrazo"
+                ),
+                cta="Agendar 15 min",
+                send_after_days=2,
+            ),
+            EmailDraft(
+                email_id=new_id(),
+                step=3,
+                subject=_truncate("Cómo lo usaron otros equipos", 80),
+                preview_text=_truncate("Casos reales — sin maquillaje.", 140),
+                body=(
+                    "Hola,\n\nUn par de casos rápidos de cómo otros equipos usan "
+                    f"{product}.\n\n[Insertar 2 casos cortos — pending para revisión humana.]\n\n"
+                    "Si querés ver más casos, escribime a este email.\n\nAbrazo"
+                ),
+                cta="Ver más casos",
+                send_after_days=5,
+            ),
+            EmailDraft(
+                email_id=new_id(),
+                step=4,
+                subject=_truncate("Tu próximo paso con " + product, 80),
+                preview_text=_truncate("Sin presión — y un descuento si te suma.", 140),
+                body=(
+                    f"Hola,\n\nDespués de esta semana con {product} probablemente ya tengas "
+                    "una idea clara de si te suma o no.\n\n"
+                    "Si querés avanzar, te dejamos un descuento por activación esta semana.\n\n"
+                    "Si no, no pasa nada — quedamos a la mano cuando lo necesites.\n\n"
+                    "Gracias por haber leído hasta acá.\n\nAbrazo"
+                ),
+                cta="Activar con descuento",
+                send_after_days=10,
+            ),
+        ]
 
     return EmailSequenceDraft(
         sequence_name=f"{brief.client.name} — nurture {brief.duration_weeks}w",
@@ -1302,6 +1454,38 @@ def generate_reels_script_pack(
     )
     pref_word = pick_preferred_word(brief.brand.lexicon_do)
     pref_suffix = f" — {pref_word}." if pref_word else "."
+    # MKT-9D: industry-aware closers and openers per family. For
+    # legal-pro we drop "Probalo hoy" / "Probalo gratis" — too
+    # SaaS-flavoured for a legaltech audience — and use "Pedir
+    # demo" / "Reservar 15 minutos" instead.
+    family = tone_family_for_brief(brief)
+    if family == "legal-pro":
+        closer = "Pedí una demo."
+        cta_default = "Pedir demo"
+        cta_short = "Pedir demo"
+        contrast_phrase = f"Con {product} eso queda ordenado{pref_suffix}"
+        errors_intro = (
+            "Tres problemas que se ven seguido en estudios jurídicos."
+        )
+        errors_outro = f"{product} los ordena."
+        testimony_hook = (
+            "Esto fue lo que nos dijeron tras la primera semana en un "
+            "estudio jurídico."
+        )
+        testimony_closer = "Si suena familiar, coordinemos una demo."
+        on_screen_problem = "¿Te suena?"
+        on_screen_outro = "Pedir demo"
+    else:
+        closer = "Probalo hoy."
+        cta_default = "Empezá hoy"
+        cta_short = "Probalo gratis"
+        contrast_phrase = f"Con {product} eso cambia{pref_suffix}"
+        errors_intro = "Estos 3 errores los vemos seguido."
+        errors_outro = f"{product} los resuelve."
+        testimony_hook = "Esto fue lo que nos dijeron en la primera semana."
+        testimony_closer = "Si te suena, probalo."
+        on_screen_problem = "¿Te suena?"
+        on_screen_outro = "Empezá hoy"
 
     scripts = [
         ReelsScriptEntry(
@@ -1318,15 +1502,15 @@ def generate_reels_script_pack(
             ],
             voiceover_lines=[
                 f"La mayoría de {audience.label.lower()} pierde tiempo en {pain_token}.",
-                f"Con {product} eso cambia{pref_suffix}",
-                "Probalo hoy.",
+                contrast_phrase,
+                closer,
             ],
             on_screen_text=[
-                "¿Te suena?",
+                on_screen_problem,
                 diffs[0],
-                "Empezá hoy",
+                on_screen_outro,
             ],
-            cta="Empezá hoy",
+            cta=cta_default,
             target_duration_s=30,
         ),
         ReelsScriptEntry(
@@ -1343,12 +1527,12 @@ def generate_reels_script_pack(
                 "45-50s: CTA",
             ],
             voiceover_lines=[
-                "Estos 3 errores los vemos seguido.",
+                errors_intro,
                 # MKT-4D: derived from real diffs when available — used
                 # to literally read "Error 1, error 2, error 3."
                 ". ".join(diffs[:3]) + ".",
-                f"{product} los resuelve.",
-                "Probalo.",
+                errors_outro,
+                closer,
             ],
             on_screen_text=[
                 _truncate(d, 40) for d in diffs[:3]
@@ -1359,7 +1543,7 @@ def generate_reels_script_pack(
         ReelsScriptEntry(
             script_id=new_id(),
             title="Hook #3 — testimonio rápido",
-            hook="Esto fue lo que nos dijeron en la primera semana.",
+            hook=testimony_hook,
             beats=[
                 "0-3s: hook con cita",
                 "3-20s: caso concreto",
@@ -1368,14 +1552,14 @@ def generate_reels_script_pack(
             voiceover_lines=[
                 "Esto fue lo que nos dijeron.",
                 "[Insertar cita de cliente real — pending revisión humana.]",
-                "Si te suena, probalo.",
+                testimony_closer,
             ],
             on_screen_text=[
                 "Caso real",
                 "Resultado en 1 semana",
-                "Probalo",
+                on_screen_outro,
             ],
-            cta="Probalo gratis",
+            cta=cta_short,
             target_duration_s=30,
         ),
     ]

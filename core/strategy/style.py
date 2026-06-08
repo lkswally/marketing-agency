@@ -90,6 +90,14 @@ _TONE_FAMILIES: dict[str, tuple[str, str, str]] = {
     "calido": ("cercano", "entre nosotros", "Te lo decimos así:"),
     "profesional": ("riguroso", "técnicamente", "Profesionalmente:"),
     "neutral": ("práctico", "en concreto", "En concreto:"),
+    # MKT-9D: industry-specific tone families. Selected by
+    # ``tone_family_for_brief`` when the intake's industry or
+    # audience description signals the domain.
+    "legal-pro": (
+        "ordenado",
+        "en la práctica",
+        "En la práctica del estudio:",
+    ),
 }
 
 # Lookup: each user tone word maps via substring match to a family key.
@@ -220,6 +228,75 @@ def tone_connector(tone_words: Iterable[str]) -> str:
 def tone_opener(tone_words: Iterable[str]) -> str:
     """Return an opening phrase consistent with the tone family."""
     return _TONE_FAMILIES[_classify_tone(tone_words)][2]
+
+
+# ---------- MKT-9D: industry-aware tone selection ----------
+
+# Industry slugs / audience-description tokens that trigger the
+# ``legal-pro`` family. Substring match against fold_diacritics(text).
+_LEGAL_INDUSTRY_TOKENS: tuple[str, ...] = (
+    "legal", "legaltech", "juridic", "abogad",
+    "estudio juridico", "law firm", "estudio legal",
+)
+# Audience-description signals that confirm the legal domain even
+# when the ``industry`` field is empty / generic.
+_LEGAL_AUDIENCE_TOKENS: tuple[str, ...] = (
+    "abogad", "estudio juridic", "expediente", "vencimient",
+    "honorario", "juicio", "judicial",
+)
+
+
+def tone_family_for_brief(brief) -> str:  # type: ignore[no-untyped-def]
+    """Pick the best tone family for the brief.
+
+    Priority:
+    1. Industry signal — when ``brief.client.industry`` matches a
+       known domain slug we return the domain-specific family
+       (today only ``legal-pro``).
+    2. Audience signal — when the audience description carries
+       domain-specific tokens (``abogad``, ``expediente``, etc.)
+       we return the domain family even if ``industry`` is empty.
+    3. Brand-tone fallback — defers to the existing
+       :func:`_classify_tone` over ``brief.brand.tone_words``.
+
+    The helper accepts the brief object loosely (typed as ``object``
+    so this module can stay free of a circular import on
+    :class:`StrategyInputBrief`). It probes attributes defensively.
+    """
+
+    # 1. Industry
+    industry = getattr(
+        getattr(brief, "client", None), "industry", None,
+    ) or ""
+    industry_folded = fold_diacritics(industry).lower()
+    if any(tok in industry_folded for tok in _LEGAL_INDUSTRY_TOKENS):
+        return "legal-pro"
+
+    # 2. Audience description tokens
+    hints = getattr(brief, "audience_hints", None) or []
+    for hint in hints:
+        desc = getattr(hint, "description", None) or ""
+        desc_folded = fold_diacritics(desc).lower()
+        if any(tok in desc_folded for tok in _LEGAL_AUDIENCE_TOKENS):
+            return "legal-pro"
+
+    # 3. Brand-tone fallback
+    tone_words = getattr(
+        getattr(brief, "brand", None), "tone_words", None,
+    ) or ()
+    return _classify_tone(tone_words)
+
+
+def tone_adjective_for_brief(brief) -> str:  # type: ignore[no-untyped-def]
+    return _TONE_FAMILIES[tone_family_for_brief(brief)][0]
+
+
+def tone_connector_for_brief(brief) -> str:  # type: ignore[no-untyped-def]
+    return _TONE_FAMILIES[tone_family_for_brief(brief)][1]
+
+
+def tone_opener_for_brief(brief) -> str:  # type: ignore[no-untyped-def]
+    return _TONE_FAMILIES[tone_family_for_brief(brief)][2]
 
 
 def pick_preferred_word(
