@@ -1697,6 +1697,50 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_utm_plan(args: argparse.Namespace, *, out) -> int:
+    """Generate a UTM tracking plan for a client.
+
+    Reads the existing ``campaign_strategy_report`` from memory and produces
+    UTM-tagged links for every channel/piece combination.
+
+    Output files:
+    - ``<outputs-dir>/<client>/utm-plan.md``
+    - ``<outputs-dir>/<client>/utm-plan.json``
+
+    Exit codes:
+    - 0 on success (including when no strategy report exists — a fallback
+      plan is generated with a recommendation to run the strategy first).
+    - 2 on argument or configuration error.
+    """
+    from core.intelligence.utm_builder import UTMBuilder, persist_utm_plan
+    from core.memory import JsonFileMemory
+
+    client_slug = args.client
+    memory = JsonFileMemory(Path(args.root))
+    outputs_root = Path(args.outputs_dir)
+    base_url = getattr(args, "base_url", None) or "https://example.com"
+    period = getattr(args, "period", None) or None
+
+    builder = UTMBuilder(memory, base_url=base_url)
+    plan = builder.build(client_slug, period=period)
+
+    md_path, json_path = persist_utm_plan(plan, memory, outputs_root=outputs_root)
+
+    payload = {
+        "status": "ok",
+        "client_slug": plan.client_slug,
+        "campaign_name": plan.campaign_name,
+        "period": plan.period,
+        "total_links": plan.total_links,
+        "channels_covered": plan.channels_covered,
+        "utm_plan_md": str(md_path),
+        "utm_plan_json": str(json_path),
+        "recommendations": len(plan.recommendations),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
     """Run the full campaign pipeline from an intake JSON.
 
@@ -2477,6 +2521,35 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_rc.set_defaults(func=_cmd_run_campaign)
+
+    # utm-plan
+    p_utm = subs.add_parser(
+        "utm-plan",
+        help="generate a UTM tracking plan from the client's strategy report",
+    )
+    p_utm.add_argument("--client", required=True, help="client slug")
+    p_utm.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_utm.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where utm-plan.md and utm-plan.json are written (default: outputs/)",
+    )
+    p_utm.add_argument(
+        "--base-url",
+        default="https://example.com",
+        dest="base_url",
+        help="base landing page URL for UTM link generation (default: https://example.com)",
+    )
+    p_utm.add_argument(
+        "--period",
+        default=None,
+        help="campaign period label, e.g. 2024-Q3 (default: current YYYY-MM)",
+    )
+    p_utm.set_defaults(func=_cmd_utm_plan)
 
     return parser
 
