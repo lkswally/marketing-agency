@@ -4,8 +4,7 @@ version: 1
 spec_version: skill-spec.v1
 status: spec_only
 deterministic: false
-external_dependencies:
-  - competitor_monitor (dry-run in MKT-10X; real HTTP in future)
+external_dependencies: []
 inputs:
   - client_slug: str
   - competitor_urls: list[str]

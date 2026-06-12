@@ -4,9 +4,7 @@ version: 1
 spec_version: skill-spec.v1
 status: spec_only
 deterministic: false
-external_dependencies:
-  - google_trends (dry-run in MKT-10X; requires pytrends in future)
-  - reddit (dry-run in MKT-10X; requires public Reddit API in future)
+external_dependencies: []
 inputs:
   - client_slug: str
   - keywords: list[str]

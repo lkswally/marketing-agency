@@ -2,17 +2,16 @@
 skill_id: utm-builder
 version: 1
 spec_version: skill-spec.v1
-status: implemented
+status: spec_only
 deterministic: true
 external_dependencies: []
 inputs:
   - client_slug: str
   - base_url: str
-  - period: str  # optional; defaults to current YYYY-MM
+  - period: str
 outputs:
   - plan: UTMPlan
 used_by: [utm-tracking-agent]
-cli_command: "mkt utm-plan --client <slug>"
 ---
 
 # utm-builder

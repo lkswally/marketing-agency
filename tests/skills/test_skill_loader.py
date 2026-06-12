@@ -1,4 +1,4 @@
-"""Skill loader tests — must successfully parse all 17 real skill specs."""
+"""Skill loader tests — must successfully parse all real skill specs."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ REPO_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 
 def test_load_all_real_skills() -> None:
     specs = load_all_skills(REPO_SKILLS_DIR)
-    assert len(specs) == 17
+    assert len(specs) == 24
     ids = {s.skill_id for s in specs}
     expected = {
         "brand-voice-extractor",
@@ -33,6 +33,14 @@ def test_load_all_real_skills() -> None:
         "claim-validator",
         "approval-packager",
         "optimization-recommendation",
+        # MKT-10X
+        "competitor-intelligence",
+        "trend-detector",
+        "content-gap-finder",
+        "creative-fatigue-scorer",
+        "budget-pacer",
+        "weekly-executive-report",
+        "utm-builder",
     }
     assert expected.issubset(ids)
 
