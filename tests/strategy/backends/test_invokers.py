@@ -47,11 +47,11 @@ def test_refusing_always_raises_no_real_invoker_error() -> None:
         inv.complete("p", system=None, context=_ctx())
 
 
-def test_refusing_error_message_mentions_mkt_4b() -> None:
+def test_refusing_error_message_mentions_anthropic_sdk_invoker() -> None:
     inv = RefusingClaudeInvoker()
     with pytest.raises(NoRealInvokerError) as ei:
         inv.complete("p", system=None, context=_ctx())
-    assert "MKT-4" in str(ei.value)
+    assert "AnthropicSDKInvoker" in str(ei.value)
 
 
 def test_no_real_invoker_error_is_a_claude_invoker_error() -> None:

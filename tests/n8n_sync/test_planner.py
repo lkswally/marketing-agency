@@ -44,12 +44,13 @@ def _run_full_chain(tmp_path: Path, *, risky: bool = False, with_notion: bool = 
     # Build the execution task pack (orchestrator doesn't auto-run it).
     from core.approval import APPROVAL_PACK_KIND, ApprovalPack
     from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
-    from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack
+    from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack, CreativeFactory
     from core.creative import SINGLETON_ID as CREATIVE_SINGLETON
+    from core.memory import EntityNotFound
     from core.strategy import REPORT_KIND, CampaignStrategyReport
     from core.strategy import SINGLETON_ID as STRATEGY_SINGLETON
     from core.visual import SINGLETON_ID as VISUAL_SINGLETON
-    from core.visual import VISUAL_PACK_KIND, VisualDirectionPack
+    from core.visual import VISUAL_PACK_KIND, VisualDirectionPack, VisualPromptFactory
 
     report = CampaignStrategyReport.model_validate(
         mem.get(summary.client_slug, REPORT_KIND, STRATEGY_SINGLETON)
@@ -57,12 +58,25 @@ def _run_full_chain(tmp_path: Path, *, risky: bool = False, with_notion: bool = 
     approval = ApprovalPack.model_validate(
         mem.get(summary.client_slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
     )
-    creative = CreativeAssetPack.model_validate(
-        mem.get(summary.client_slug, CREATIVE_PACK_KIND, CREATIVE_SINGLETON)
-    )
-    visual = VisualDirectionPack.model_validate(
-        mem.get(summary.client_slug, VISUAL_PACK_KIND, VISUAL_SINGLETON)
-    )
+    # When approval blocks publish the orchestrator skips creative/visual by
+    # default. Build the packs manually so downstream artifact consumers
+    # (n8n planner, task factory) can access them in memory.
+    try:
+        creative = CreativeAssetPack.model_validate(
+            mem.get(summary.client_slug, CREATIVE_PACK_KIND, CREATIVE_SINGLETON)
+        )
+    except EntityNotFound:
+        cf = CreativeFactory(memory=mem)
+        creative = cf.build(report, approval)
+        cf.persist(creative)
+    try:
+        visual = VisualDirectionPack.model_validate(
+            mem.get(summary.client_slug, VISUAL_PACK_KIND, VISUAL_SINGLETON)
+        )
+    except EntityNotFound:
+        vf = VisualPromptFactory(memory=mem)
+        visual = vf.build(report, approval, creative)
+        vf.persist(visual)
     tf = TaskFactory(memory=mem)
     pack = tf.build(report, approval, creative, visual)
     tf.persist(pack)

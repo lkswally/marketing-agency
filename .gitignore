@@ -39,10 +39,13 @@ Thumbs.db
 desktop.ini
 
 # MKT runtime state (kept locally, not versioned)
+# data/* catches data/<any-slug>/ (e.g. data/lexia/, data/acme/).
+# Only the structural placeholder data/clients/.gitkeep is tracked.
+data/*
+!data/clients
+!data/clients/.gitkeep
 outputs/*
 !outputs/.gitkeep
-data/clients/*/
-!data/clients/.gitkeep
 assets/clients/*/
 !assets/clients/.gitkeep
 
@@ -54,4 +57,3 @@ logs/
 .engram-cache/
 .pipeline/
 .engram/
-data/lexia/

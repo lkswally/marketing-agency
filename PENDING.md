@@ -1575,3 +1575,26 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-9A
 - **Why deferred:** The user spec for MKT-9A explicitly forbade editing. A future block can add a feature-flagged edit mode that produces a diff + audit event without touching disk silently.
 - **Resolves at:** only when operators explicitly ask for it.
+
+---
+
+## From MKT-10X (market intelligence + UTM foundation)
+
+### P-10X.1 — Real intelligence adapters (no dry-run)
+- **Introduced:** MKT-10X
+- **Why deferred:** All 5 adapters (Google Trends, Reddit, YouTube, Meta Ads, competitor monitor) are dry-run only. No SDK imports, no HTTP, no credentials.
+- **Resolves at:** when the operator enables a specific integration.
+
+### P-10X.2 — UTM link validator
+- **Introduced:** MKT-10X
+- **Why deferred:** Generated UTM URLs are structurally valid but not tested against live pages. A future block could run a dry-run `HEAD` check on `final_url`.
+- **Resolves at:** when URL validation becomes operationally useful.
+
+---
+
+## From MKT-10Y (Windows pytest baseline stabilization)
+
+### P-10Y.1 — Linux / macOS baseline doc
+- **Introduced:** MKT-10Y
+- **Why deferred:** `docs/runtime/windows-test-baseline.md` covers Windows only. A parallel doc for POSIX does not exist because no POSIX-specific failures have been observed.
+- **Resolves at:** if a non-Windows contributor encounters a CI anomaly.

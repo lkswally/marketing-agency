@@ -236,6 +236,41 @@ class PipelineOrchestrator:
             self._persist_summary_and_render(summary)
             return self._finalize_summary(summary)
 
+        # Default: approval blocks without an explicit override flag.
+        # Creative/visual stages are SKIPPED — no publish-ready outputs generated.
+        # Audit trail records "approval.blocked". Exit 0 (degraded, not a crash).
+        if approval_pack.blocks_publish:
+            self._emit_event(
+                client_slug=client_slug,
+                payload={
+                    "action": "approval.blocked",
+                    "approval_pack_id": approval_pack.pack_id,
+                    "note": (
+                        "creative + visual stages skipped; "
+                        "pass --stop-on-blocked (exit 0) or "
+                        "--require-approval (exit 3) to make the gate explicit"
+                    ),
+                },
+            )
+            stages.extend(
+                self._skip_stages(
+                    [StageId.CREATIVE, StageId.VISUAL],
+                    note="skipped — approval blocks publish",
+                )
+            )
+            summary = self._build_summary(
+                started_at=started_at,
+                stages=stages,
+                client_slug=client_slug,
+                intake_validation=validation,
+                report=report,
+                approval_pack=approval_pack,
+                creative_pack=None,
+                visual_pack=None,
+            )
+            self._persist_summary_and_render(summary)
+            return self._finalize_summary(summary)
+
         # ----- Stage 4: creative -----
         creative_result, creative_pack = self._stage_creative(
             client_slug, report, approval_pack
