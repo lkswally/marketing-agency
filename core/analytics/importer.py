@@ -63,6 +63,8 @@ from .models import (
     MetricRow,
     MetricSource,
     MetricsSnapshot,
+    snapshot_entity_id,
+    snapshot_id_from_period,
 )
 
 
@@ -121,6 +123,9 @@ class AnalyticsImporter:
         client_slug: str,
         source: MetricSource,
         file_path: Path | str,
+        period_start: _date | None = None,
+        period_end: _date | None = None,
+        period_label: str | None = None,
     ) -> tuple[AnalyticsImportReport, MetricsSnapshot]:
         path = Path(file_path)
         if not path.exists():
@@ -129,9 +134,10 @@ class AnalyticsImporter:
         raw_rows = _read_rows(path)
         new_rows, reasons = _normalise(raw_rows, source)
 
-        snapshot = self._load_or_init_snapshot(client_slug)
-        snapshot.rows.extend(new_rows)
-        snapshot.updated_at = utcnow()
+        # Always update the 'current' aggregate (backward compat).
+        current_snapshot = self._load_or_init_snapshot(client_slug, SINGLETON_ID)
+        current_snapshot.rows.extend(new_rows)
+        current_snapshot.updated_at = utcnow()
 
         report = AnalyticsImportReport(
             client_slug=client_slug,
@@ -139,16 +145,44 @@ class AnalyticsImporter:
             file_path=str(path),
             rows_imported=len(new_rows),
             rows_rejected=len(reasons),
-            rejected_reasons=reasons[:50],  # cap to keep report bounded
+            rejected_reasons=reasons[:50],
             imported_at=utcnow(),
+            period_start=period_start,
+            period_end=period_end,
+            period_label=period_label,
         )
-        snapshot.last_import_id = report.import_id
+        current_snapshot.last_import_id = report.import_id
 
-        # Persist snapshot + report.
         self._memory.put(
             client_slug, METRICS_SNAPSHOT_KIND, SINGLETON_ID,
-            snapshot.model_dump(mode="json"),
+            current_snapshot.model_dump(mode="json"),
         )
+
+        # Period snapshot — written ONLY when period_start + period_end given.
+        period_entity_id: str | None = None
+        period_snapshot: MetricsSnapshot | None = None
+        if period_start is not None and period_end is not None:
+            period_entity_id = snapshot_entity_id(source, period_start, period_end)
+            period_snapshot = self._load_or_init_period_snapshot(
+                client_slug=client_slug,
+                entity_id=period_entity_id,
+                source=source,
+                period_start=period_start,
+                period_end=period_end,
+                period_label=period_label,
+            )
+            period_snapshot.rows.extend(new_rows)
+            period_snapshot.updated_at = utcnow()
+            period_snapshot.last_import_id = report.import_id
+            self._memory.put(
+                client_slug, METRICS_SNAPSHOT_KIND, period_entity_id,
+                period_snapshot.model_dump(mode="json"),
+            )
+            # Stamp the entity_id onto the report.
+            report = AnalyticsImportReport.model_validate(
+                {**report.model_dump(mode="json"), "period_snapshot_entity_id": period_entity_id}
+            )
+
         self._memory.put(
             client_slug, ANALYTICS_IMPORT_REPORT_KIND, SINGLETON_ID,
             report.model_dump(mode="json"),
@@ -156,31 +190,37 @@ class AnalyticsImporter:
 
         # Audit event.
         prev = self._memory.last_audit_hash(client_slug)
+        audit_payload: dict = {
+            "action": "imported",
+            "import_id": report.import_id,
+            "source": source.value,
+            "rows_imported": report.rows_imported,
+            "rows_rejected": report.rows_rejected,
+            "snapshot_id": current_snapshot.snapshot_id,
+            "snapshot_total_rows": current_snapshot.total_rows,
+        }
+        if period_entity_id:
+            audit_payload["period_start"] = str(period_start)
+            audit_payload["period_end"] = str(period_end)
+            audit_payload["period_label"] = period_label
+            audit_payload["period_snapshot_entity_id"] = period_entity_id
         event = AuditTrailEvent.build(
             event_type=AuditEventType.NOTE,
             actor="analytics_importer",
             occurred_at=utcnow(),
             client_slug=client_slug,
-            payload={
-                "analytics_import": {
-                    "action": "imported",
-                    "import_id": report.import_id,
-                    "source": source.value,
-                    "rows_imported": report.rows_imported,
-                    "rows_rejected": report.rows_rejected,
-                    "snapshot_id": snapshot.snapshot_id,
-                    "snapshot_total_rows": snapshot.total_rows,
-                }
-            },
+            payload={"analytics_import": audit_payload},
             prev_hash=prev,
         )
         self._memory.append_audit_event(event)
 
-        return report, snapshot
+        return report, period_snapshot if period_snapshot is not None else current_snapshot
 
-    def _load_or_init_snapshot(self, client_slug: str) -> MetricsSnapshot:
+    def _load_or_init_snapshot(
+        self, client_slug: str, entity_id: str = SINGLETON_ID
+    ) -> MetricsSnapshot:
         try:
-            raw = self._memory.get(client_slug, METRICS_SNAPSHOT_KIND, SINGLETON_ID)
+            raw = self._memory.get(client_slug, METRICS_SNAPSHOT_KIND, entity_id)
             return MetricsSnapshot.model_validate(raw)
         except EntityNotFound:
             now = utcnow()
@@ -191,6 +231,34 @@ class AnalyticsImporter:
                 updated_at=now,
             )
 
+    def _load_or_init_period_snapshot(
+        self,
+        *,
+        client_slug: str,
+        entity_id: str,
+        source: MetricSource,
+        period_start: _date,
+        period_end: _date,
+        period_label: str | None,
+    ) -> MetricsSnapshot:
+        try:
+            raw = self._memory.get(client_slug, METRICS_SNAPSHOT_KIND, entity_id)
+            return MetricsSnapshot.model_validate(raw)
+        except EntityNotFound:
+            now = utcnow()
+            return MetricsSnapshot(
+                # Deterministic snapshot_id so re-import of same period is stable.
+                snapshot_id=snapshot_id_from_period(source, period_start, period_end),
+                client_slug=client_slug,
+                rows=[],
+                created_at=now,
+                updated_at=now,
+                source=source,
+                period_start=period_start,
+                period_end=period_end,
+                period_label=period_label,
+            )
+
 
 def import_and_persist(
     memory: Memory,
@@ -198,9 +266,17 @@ def import_and_persist(
     client_slug: str,
     source: MetricSource,
     file_path: Path | str,
+    period_start: _date | None = None,
+    period_end: _date | None = None,
+    period_label: str | None = None,
 ) -> tuple[AnalyticsImportReport, MetricsSnapshot]:
     return AnalyticsImporter(memory=memory).import_file(
-        client_slug=client_slug, source=source, file_path=file_path
+        client_slug=client_slug,
+        source=source,
+        file_path=file_path,
+        period_start=period_start,
+        period_end=period_end,
+        period_label=period_label,
     )
 
 

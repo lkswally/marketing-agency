@@ -844,6 +844,8 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
     - 0 on success (even with rejected rows; check the report)
     - 2 when the file is missing / unparseable
     """
+    import datetime as _datetime_mod
+
     from core.analytics import (
         AnalyticsImporter,
         ImporterError,
@@ -867,11 +869,32 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
         )
         return 2
 
+    # Parse optional period arguments.
+    period_start: _datetime_mod.date | None = None
+    period_end: _datetime_mod.date | None = None
+    if getattr(args, "period_start", None):
+        try:
+            period_start = _datetime_mod.date.fromisoformat(args.period_start)
+        except ValueError:
+            print(f"error: invalid --period-start {args.period_start!r}; expected YYYY-MM-DD", file=out)
+            return 2
+    if getattr(args, "period_end", None):
+        try:
+            period_end = _datetime_mod.date.fromisoformat(args.period_end)
+        except ValueError:
+            print(f"error: invalid --period-end {args.period_end!r}; expected YYYY-MM-DD", file=out)
+            return 2
+
     memory = JsonFileMemory(Path(args.root))
     importer = AnalyticsImporter(memory=memory)
     try:
         report, snapshot = importer.import_file(
-            client_slug=args.client, source=source, file_path=file_path
+            client_slug=args.client,
+            source=source,
+            file_path=file_path,
+            period_start=period_start,
+            period_end=period_end,
+            period_label=getattr(args, "period_label", None) or None,
         )
     except ImporterError as e:
         print(f"error: {e}", file=out)
@@ -893,6 +916,10 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
         "rows_rejected": report.rows_rejected,
         "snapshot_id": snapshot.snapshot_id,
         "snapshot_total_rows": snapshot.total_rows,
+        "period_start": str(report.period_start) if report.period_start else None,
+        "period_end": str(report.period_end) if report.period_end else None,
+        "period_label": report.period_label,
+        "period_snapshot_entity_id": report.period_snapshot_entity_id,
         "markdown_path": str(md_path),
         "json_path": str(json_path),
     }
@@ -2174,6 +2201,23 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outputs",
         help="directory where the import report MD/JSON are written",
     )
+    p_im.add_argument(
+        "--period-start",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="start of the reporting period (enables time-ranged snapshot)",
+    )
+    p_im.add_argument(
+        "--period-end",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="end of the reporting period (required when --period-start is set)",
+    )
+    p_im.add_argument(
+        "--period-label",
+        default=None,
+        help="human-readable period label, e.g. '2024-W24' or '2024-Q2'",
+    )
     p_im.set_defaults(func=_cmd_import_metrics)
 
     # analyze-metrics (MKT-6A)
@@ -2302,6 +2346,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--outputs-dir",
         default="outputs",
         help="directory where the fetch report MD/JSON are written",
+    )
+    p_xfetch.add_argument(
+        "--period-label",
+        default=None,
+        help="human-readable period label for the auto-derived period snapshot",
     )
     p_xfetch.set_defaults(func=_cmd_analytics_fetch)
 
