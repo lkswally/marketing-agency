@@ -4,7 +4,7 @@ Run with:
 
     mkt portal
     # or
-    python -m streamlit run portal/app.py -- --root <data> --outputs-dir <out>
+    python -m streamlit run portal/app.py -- --root <data/clients> --outputs-dir <out>
 
 This module is the ONLY place that imports ``streamlit``. Every
 other module in :mod:`portal` is plain Python and unit-testable
@@ -40,7 +40,7 @@ from portal.pack_loader import (
 )
 from portal.pack_registry import iter_pack_specs
 
-_DEFAULT_ROOT = Path("data")
+_DEFAULT_ROOT = Path("data/clients")
 _DEFAULT_OUTPUTS = Path("outputs")
 
 _STATUS_ICON = {

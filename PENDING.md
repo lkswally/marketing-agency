@@ -1578,6 +1578,54 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 
 ---
 
+## From MKT-9B (Alpha Pilot 1 findings — LEXIA)  ✅ RESOLVED
+
+- **Introduced:** MKT-9B
+- **Resolved at:** MKT-9B (same block) — fixed `portal/pack_registry.py` kind
+  mismatches (`"strategy"` → `campaign_strategy_report`, `n8n_execution_plan`
+  → `n8n_execution_payload`) that made the portal report existing packs as
+  MISSING; `core/atlas_bridge/factory.py` now persists one JSON per handoff
+  kind (landing/branding/page_design) instead of all three overwriting a
+  shared `current.json`; templated-backend quality lift in
+  `core/strategy/templates.py` (executive summary weaves a preferred word,
+  channel rationales are no longer identical boilerplate, diagnosis surfaces
+  competitor names + forbidden words).
+- **Notes:** 14 net-new tests across 4 files. No new features, no new
+  external integrations — pure correctness + templated-quality fix triggered
+  by running the pipeline against the real `examples/intake/lexia.json`.
+  `data/lexia/` added to gitignore as the per-pilot working directory
+  (superseded by the broader `data/*` pattern from MKT-10A).
+
+## From MKT-9C (legal domain templated outputs)  ✅ RESOLVED
+
+- **Introduced:** MKT-9C
+- **Resolved at:** MKT-9C (same block) — added domain-aware extraction
+  helpers to `core/strategy/templates.py` (`_extract_product_features`,
+  `_detect_anti_pattern_tools`, `_extract_pains_from_intake`,
+  `_sanitize_forbidden`) so a real-business intake (LEXIA) produces
+  domain-specific pain points, headlines, keyword clusters, social copy and
+  reels voiceover instead of generic SaaS boilerplate.
+- **Notes:** 16 new tests in `tests/strategy/test_mkt9c_legal_domain_outputs.py`.
+  No new module, no new dependency, no API call, no Claude — pure templated
+  improvements over the existing deterministic backend.
+
+## From MKT-9D (industry-aware tone templates)  ✅ RESOLVED
+
+- **Introduced:** MKT-9D
+- **Resolved at:** MKT-9D (same block) — added a `"legal-pro"` tone family
+  and `tone_family_for_brief(brief)` three-tier detector (industry signal →
+  audience-description signal → brand-tone fallback) to
+  `core/strategy/style.py`; wired `generate_social_post_drafts`,
+  `generate_email_sequence` and `generate_reels_script_pack` in
+  `core/strategy/templates.py` to select copy per detected tone family so
+  legal/legaltech intakes stop reading like generic SaaS marketing.
+- **Notes:** 12 new tests in `tests/strategy/test_mkt9d_industry_tone.py`.
+  Existing `tone_adjective` / `tone_connector` / `tone_opener` helpers kept
+  unchanged for backward compat with non-strategy callers. No new modules,
+  no new dependencies, no Claude.
+
+---
+
 ## From MKT-10X (market intelligence + UTM foundation)
 
 ### P-10X.1 — Real intelligence adapters (no dry-run)
@@ -1598,3 +1646,28 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-10Y
 - **Why deferred:** `docs/runtime/windows-test-baseline.md` covers Windows only. A parallel doc for POSIX does not exist because no POSIX-specific failures have been observed.
 - **Resolves at:** if a non-Windows contributor encounters a CI anomaly.
+
+---
+
+## From MKT-10B (time-ranged metrics snapshots)  ✅ RESOLVED
+
+- **Introduced:** MKT-10B
+- **Resolved at:** MKT-10B (same block) — `MetricsSnapshot` gained
+  `period_start` / `period_end` / `period_label` / `source` fields;
+  deterministic `snapshot_entity_id(source, period_start, period_end)` and
+  `snapshot_id_from_period(...)` (SHA-256) make re-imports of the same
+  period idempotent instead of duplicating; `core/analytics/snapshot_repo.py`
+  ships `list_metric_snapshots` / `load_metric_snapshot` /
+  `latest_metric_snapshot`; `AnalyticsImporter` and `AnalyticsFetchService`
+  dual-write — every import/fetch still updates the `"current"` singleton
+  (backward compat for the analyzer / feedback / iteration planners) AND, when
+  a period is known, the period-keyed snapshot. CLI: `--period-start` /
+  `--period-end` / `--period-label` on `import-metrics`; `--period-label` on
+  `analytics-fetch`.
+- **Notes:** 22 new tests in `tests/analytics/test_snapshot_repo.py`. Full
+  suite green (1792 passed), ruff clean, ATLAS untouched. This item directly
+  unblocks **P-6A.3** (multiple snapshots per client) — every deferred item
+  cross-referencing P-6A.3 (P-6B.3, P-6C.4, P-6F.8, P-6G.8, P-9A.4) can now
+  build on the period-snapshot primitive shipped here, though the comparison
+  logic itself (deltas, cycle-vs-cycle views) is still NOT implemented and
+  remains open at those items.
