@@ -31,6 +31,7 @@ from .context import (
     OperationRole,
     OperationSource,
 )
+from .exit_codes import ExitCode, exit_code_for
 from .result import (
     Artifact,
     ErrorCode,
@@ -46,6 +47,7 @@ __all__ = [
     "Artifact",
     "ArtifactWriteError",
     "ErrorCode",
+    "ExitCode",
     "OperationContext",
     "OperationError",
     "OperationResult",
@@ -54,4 +56,5 @@ __all__ = [
     "OperationStatus",
     "OperationWarning",
     "OutputLayout",
+    "exit_code_for",
 ]

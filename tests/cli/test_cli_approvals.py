@@ -67,10 +67,12 @@ def test_approvals_show_happy_path(tmp_path: Path) -> None:
 
 
 def test_approvals_show_not_found(tmp_path: Path) -> None:
+    # MKT-11B: differentiated exit codes — NOT_FOUND is now 3, not the
+    # generic 2 (see core.application.exit_codes.ExitCode).
     code, stdout = _run([
         "approvals", "show", "--client", "acme", "--root", str(tmp_path / "mem"),
     ])
-    assert code == 2
+    assert code == 3
     assert "no ApprovalPack" in stdout
 
 
@@ -90,10 +92,13 @@ def test_approve_happy_path(tmp_path: Path) -> None:
 
 
 def test_approve_not_found_exits_2(tmp_path: Path) -> None:
+    # MKT-11B: differentiated exit codes — NOT_FOUND is now 3, not the
+    # generic 2 (see core.application.exit_codes.ExitCode). Function name
+    # kept as-is to preserve this test's identity as a regression pin.
     code, stdout = _run([
         "approve", "--client", "acme", "--root", str(tmp_path / "mem"),
     ])
-    assert code == 2
+    assert code == 3
     assert "no ApprovalPack" in stdout
 
 
@@ -109,10 +114,12 @@ def test_approve_idempotent(tmp_path: Path) -> None:
 
 
 def test_approve_after_reject_exits_2(tmp_path: Path) -> None:
+    # MKT-11B: differentiated exit codes — INVALID_STATE_TRANSITION is
+    # now 4, not the generic 2. Function name kept as-is (regression pin).
     _seed_pack(tmp_path / "mem", "acme")
     _run(["reject", "--client", "acme", "--root", str(tmp_path / "mem"), "--reason", "no"])
     code, stdout = _run(["approve", "--client", "acme", "--root", str(tmp_path / "mem")])
-    assert code == 2
+    assert code == 4
     assert "REJECTED" in stdout or "reject" in stdout.lower()
 
 
@@ -141,10 +148,12 @@ def test_reject_requires_reason_arg() -> None:
 
 
 def test_reject_missing_pack_exits_2(tmp_path: Path) -> None:
+    # MKT-11B: differentiated exit codes — NOT_FOUND is now 3, not the
+    # generic 2. Function name kept as-is (regression pin).
     code, stdout = _run([
         "reject", "--client", "acme", "--root", str(tmp_path / "mem"), "--reason", "no data",
     ])
-    assert code == 2
+    assert code == 3
     assert "no ApprovalPack" in stdout
 
 

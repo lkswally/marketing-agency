@@ -1712,3 +1712,60 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
   job contract for long-running operations (D-11.7); no FastAPI, no
   Next.js, no Control Center UI (`control_center/` does not exist yet —
   that is MKT-11B+).
+
+---
+
+## From MKT-11B (approval operations)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11B
+- **Resolved at:** MKT-11B (same block) — extended the MKT-11A
+  `core/application/services/approvals.py` (not rebuilt; the inventory in
+  `docs/MKT-11B-Approval-Operations-Inventory.md` found `list_pending` /
+  `show` / `approve` / `reject` already shipped) with: **filters** on
+  `list_pending` — `client_slug`, `status` (bypasses the default
+  pending/blocked filter when given), `limit` — all backed by real
+  persistence fields; **`campaign_id` and date-range filters were
+  explicitly NOT implemented** — `ApprovalPack` has no `campaign_id`
+  field and only a single `"current"` pack per client exists (no
+  history), so those filters would have no honest semantics (documented
+  in the inventory, not silently skipped). **`--approval-id`** is
+  verification-only (D-11B.2) — compared against the loaded pack's
+  `pack_id`, mismatch → `NOT_FOUND`; no new index, no history, no new
+  persistence. **Role authorization** (D-11.6) via new
+  `core/application/policies.py::check_can_decide_approval` — `VIEWER`
+  and `ANALYST` are really blocked (`ErrorCode.PERMISSION_DENIED`);
+  `OPERATOR`/`APPROVER`/`ADMIN` are allowed. `OPERATOR` staying allowed
+  is a deliberate compatibility resolution, not an oversight: the
+  pre-11B contract already permitted any actor (nothing gated approval
+  before), and the MKT-11B role matrix's own carve-out — *"operator: no
+  puede aprobar salvo que el contrato actual lo permita"* — is satisfied
+  by that pre-existing reality. This keeps all 32 MKT-11A regression
+  tests green with zero modification. **`audit_event_id` bug fix**: MKT-11A
+  populated this field from `memory.last_audit_hash(...)` (the hash-chain
+  tail); it now holds the real `AuditTrailEvent.event_id`, read back via
+  `read_audit_events(...)` since `ApprovalPackBuilder._transition()`
+  doesn't return the event object it builds. New
+  `core/application/exit_codes.py` — first centralized, differentiated
+  exit-code table for the CLI (`0/2/3/4/5/6/70`); every other pre-11B
+  command keeps its own `0/2` mapping unchanged (additive, not
+  retroactive). CLI: `mkt approvals list --client/--status/--limit`,
+  `mkt approvals show --approval-id`, `mkt approve`/`mkt reject
+  --approval-id --correlation-id`.
+- **Notes:** 43 new tests (`tests/application/test_approvals_service_mkt11b.py`,
+  `tests/cli/test_cli_approvals_mkt11b.py`), kept in separate files from
+  the MKT-11A regression pins so the diff stays legible. Exactly 4
+  existing CLI assertions (in `tests/cli/test_cli_approvals.py`) were
+  updated — not their function names, not their setup, only the exit-code
+  literal (`2` → `3` or `4`) — because differentiating those codes was
+  this block's own explicit, approved requirement; every other assertion
+  in that file, and all 18 tests in `tests/application/test_approvals_service.py`,
+  are untouched. Full suite green, ruff clean, `portal/` untouched (its
+  read-only pins re-verified), `run-campaign` untouched, ATLAS untouched.
+- **Deliberately NOT done in this block:** `campaign_id` / date-range
+  filters (no domain field / no history — see above); a global `--role`
+  CLI flag (not in the confirmed CLI flag list; role is only exercised
+  directly at the service layer in this block's tests); `run-campaign`
+  as a service (still waiting on the job contract, D-11.7); jobs/queue/
+  worker; FastAPI; Next.js/React; full authentication/sessions; the
+  visual Approval Queue; automatic publishing; Market Intelligence;
+  Learning Engine; Decision Engine.

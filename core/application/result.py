@@ -47,6 +47,14 @@ class ErrorCode(StrEnum):
     PATH_NOT_ALLOWED = "path_not_allowed"
     """Resolved artifact path escapes the permitted output root."""
 
+    PERMISSION_DENIED = "permission_denied"
+    """The actor's role does not authorize this operation (MKT-11B)."""
+
+    PERSISTENCE_ERROR = "persistence_error"
+    """The stored entity could not be read back — corrupted JSON or a
+    schema mismatch (MKT-11B). Distinct from NOT_FOUND: the record exists
+    on disk but cannot be deserialised."""
+
     INTERNAL = "internal"
     """Unexpected failure — caught, never a raw traceback to the caller."""
 

@@ -1398,18 +1398,41 @@ def _cmd_seo_report(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
-    """List every ApprovalPack across all tenants that is pending
-    review or currently blocks publish (MKT-11A, D-11.5).
+    """List ApprovalPacks — pending review / blocking publish by default,
+    or narrowed with ``--client`` / ``--status`` / ``--limit`` (MKT-11A +
+    MKT-11B, D-11.5).
 
-    Cross-tenant by design — an Approval Queue has no meaning scoped to
-    a single client. Read-only.
+    Cross-tenant by design when ``--client`` is omitted — an Approval
+    Queue has no meaning scoped to a single client. Read-only.
 
-    Exit codes:
-    - 0 always (an empty queue is not an error).
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (an empty queue is not an error).
+    - 2 when ``--status`` is not a recognised state.
     """
+    from core.application import ErrorCode, exit_code_for
     from core.application.services import approvals
 
-    result = approvals.list_pending(root=Path(args.root))
+    status = getattr(args, "status", None)
+    parsed_status = None
+    if status:
+        from core.approval import ApprovalState
+
+        try:
+            parsed_status = ApprovalState(status)
+        except ValueError:
+            print(
+                f"error: invalid --status {status!r}; expected one of "
+                f"{', '.join(s.value for s in ApprovalState)}",
+                file=out,
+            )
+            return exit_code_for(ErrorCode.INVALID_INPUT)
+
+    result = approvals.list_pending(
+        root=Path(args.root),
+        client_slug=getattr(args, "client", None) or None,
+        status=parsed_status,
+        limit=getattr(args, "limit", None),
+    )
     payload = {
         "count": len(result.data),
         "pending": [
@@ -1428,21 +1451,30 @@ def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_approvals_show(args: argparse.Namespace, *, out) -> int:
-    """Show the current ApprovalPack for one client (MKT-11A, D-11.5).
+    """Show the current ApprovalPack for one client (MKT-11A + MKT-11B,
+    D-11.5).
 
-    Exit codes:
+    ``--approval-id``, when given, is verified against the loaded pack's
+    ``pack_id`` (D-11B.2) — there is no per-approval index in the domain,
+    so this is a guard against acting on the wrong pack by typo, not a
+    lookup mechanism.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
     - 0 on success.
-    - 2 when there is no ApprovalPack for the client.
+    - 3 when there is no ApprovalPack for the client, or ``--approval-id``
+      does not match the current pack.
+    - 6 when the persisted pack exists but cannot be read back (corrupted
+      JSON or a schema mismatch).
     """
-    from core.application import OperationContext
+    from core.application import OperationContext, exit_code_for
     from core.application.services import approvals
 
     ctx = OperationContext(client_slug=args.client, root=Path(args.root))
-    result = approvals.show(ctx)
+    result = approvals.show(ctx, approval_id=getattr(args, "approval_id", None) or None)
     if not result.ok:
         assert result.error is not None
         print(f"error: {result.error.message}", file=out)
-        return 2
+        return exit_code_for(result.error.code)
 
     pack = result.data
     print(pack.to_json(indent=2), file=out)
@@ -1450,27 +1482,44 @@ def _cmd_approvals_show(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_approve(args: argparse.Namespace, *, out) -> int:
-    """Approve the current ApprovalPack for one client (MKT-11A, D-11.5).
+    """Approve the current ApprovalPack for one client (MKT-11A + MKT-11B,
+    D-11.5).
 
     Wraps :meth:`core.approval.ApprovalPackBuilder.approve` — idempotent
     when the pack is already APPROVED (exit 0, warning surfaced).
+    ``--approval-id`` is optional verification only (D-11B.2). Requires a
+    role authorized to decide (``operator`` / ``approver`` / ``admin`` —
+    see ``core.application.policies``); the CLI's ``OperationContext``
+    uses its default role, so this only matters for callers that build
+    their own context (a future API/worker).
 
-    Exit codes:
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
     - 0 on success (including the idempotent no-op case).
-    - 2 when there is no ApprovalPack, or the transition is invalid
-      (e.g. the pack is already REJECTED).
+    - 3 when there is no ApprovalPack, or ``--approval-id`` mismatches.
+    - 4 when the transition is invalid (e.g. the pack is already REJECTED).
+    - 5 when the actor's role is not authorized to decide.
+    - 6 when the persisted pack exists but cannot be read back.
     """
-    from core.application import OperationContext
+    from core.application import OperationContext, exit_code_for
     from core.application.services import approvals
 
-    ctx = OperationContext(
+    ctx_kwargs: dict = dict(
         client_slug=args.client, root=Path(args.root), actor_id=args.actor,
     )
-    result = approvals.approve(ctx, notes=getattr(args, "notes", None) or None)
+    correlation_id = getattr(args, "correlation_id", None)
+    if correlation_id:
+        ctx_kwargs["correlation_id"] = correlation_id
+    ctx = OperationContext(**ctx_kwargs)
+
+    result = approvals.approve(
+        ctx,
+        notes=getattr(args, "notes", None) or None,
+        approval_id=getattr(args, "approval_id", None) or None,
+    )
     if not result.ok:
         assert result.error is not None
         print(f"error: {result.error.message}", file=out)
-        return 2
+        return exit_code_for(result.error.code)
 
     pack = result.data
     payload = {
@@ -1479,6 +1528,7 @@ def _cmd_approve(args: argparse.Namespace, *, out) -> int:
         "state": pack.state.value,
         "blocks_publish": pack.blocks_publish,
         "audit_event_id": result.audit_event_id,
+        "correlation_id": ctx.correlation_id,
         "warnings": [w.message for w in result.warnings],
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
@@ -1486,28 +1536,42 @@ def _cmd_approve(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_reject(args: argparse.Namespace, *, out) -> int:
-    """Reject the current ApprovalPack for one client (MKT-11A, D-11.5).
+    """Reject the current ApprovalPack for one client (MKT-11A + MKT-11B,
+    D-11.5).
 
     Wraps :meth:`core.approval.ApprovalPackBuilder.reject`. ``--reason``
     is mandatory — enforced at the application layer. Idempotent when the
-    pack is already REJECTED (exit 0, warning surfaced).
+    pack is already REJECTED (exit 0, warning surfaced). ``--approval-id``
+    is optional verification only (D-11B.2).
 
-    Exit codes:
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
     - 0 on success (including the idempotent no-op case).
-    - 2 when ``--reason`` is empty, there is no ApprovalPack, or the
-      transition is invalid (e.g. the pack is already APPROVED).
+    - 2 when ``--reason`` is empty.
+    - 3 when there is no ApprovalPack, or ``--approval-id`` mismatches.
+    - 4 when the transition is invalid (e.g. the pack is already APPROVED).
+    - 5 when the actor's role is not authorized to decide.
+    - 6 when the persisted pack exists but cannot be read back.
     """
-    from core.application import OperationContext
+    from core.application import OperationContext, exit_code_for
     from core.application.services import approvals
 
-    ctx = OperationContext(
+    ctx_kwargs: dict = dict(
         client_slug=args.client, root=Path(args.root), actor_id=args.actor,
     )
-    result = approvals.reject(ctx, reason=args.reason)
+    correlation_id = getattr(args, "correlation_id", None)
+    if correlation_id:
+        ctx_kwargs["correlation_id"] = correlation_id
+    ctx = OperationContext(**ctx_kwargs)
+
+    result = approvals.reject(
+        ctx,
+        reason=args.reason,
+        approval_id=getattr(args, "approval_id", None) or None,
+    )
     if not result.ok:
         assert result.error is not None
         print(f"error: {result.error.message}", file=out)
-        return 2
+        return exit_code_for(result.error.code)
 
     pack = result.data
     payload = {
@@ -1516,6 +1580,7 @@ def _cmd_reject(args: argparse.Namespace, *, out) -> int:
         "state": pack.state.value,
         "blocks_publish": pack.blocks_publish,
         "audit_event_id": result.audit_event_id,
+        "correlation_id": ctx.correlation_id,
         "warnings": [w.message for w in result.warnings],
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
@@ -2678,6 +2743,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_DATA_ROOT),
         help=f"memory root (default: {DEFAULT_DATA_ROOT})",
     )
+    p_appr_list.add_argument(
+        "--client", default=None, help="narrow to one client slug (default: all tenants)",
+    )
+    p_appr_list.add_argument(
+        "--status",
+        default=None,
+        help=(
+            "narrow to one ApprovalState (draft|needs_review|approved|rejected). "
+            "When given, replaces the default pending/blocked filter."
+        ),
+    )
+    p_appr_list.add_argument(
+        "--limit", type=int, default=None, help="cap the number of rows returned",
+    )
     p_appr_list.set_defaults(func=_cmd_approvals_list)
 
     p_appr_show = appr_subs.add_parser(
@@ -2688,6 +2767,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--root",
         default=str(DEFAULT_DATA_ROOT),
         help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_appr_show.add_argument(
+        "--approval-id",
+        dest="approval_id",
+        default=None,
+        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
     )
     p_appr_show.set_defaults(func=_cmd_approvals_show)
 
@@ -2709,6 +2794,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_approve.add_argument(
         "--notes", default=None, help="optional reviewer notes",
     )
+    p_approve.add_argument(
+        "--approval-id",
+        dest="approval_id",
+        default=None,
+        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+    )
+    p_approve.add_argument(
+        "--correlation-id",
+        dest="correlation_id",
+        default=None,
+        help="caller-supplied correlation id (default: auto-generated)",
+    )
     p_approve.set_defaults(func=_cmd_approve)
 
     # reject (MKT-11A, D-11.5)
@@ -2728,6 +2825,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_reject.add_argument(
         "--reason", required=True, help="mandatory reason for rejection",
+    )
+    p_reject.add_argument(
+        "--approval-id",
+        dest="approval_id",
+        default=None,
+        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+    )
+    p_reject.add_argument(
+        "--correlation-id",
+        dest="correlation_id",
+        default=None,
+        help="caller-supplied correlation id (default: auto-generated)",
     )
     p_reject.set_defaults(func=_cmd_reject)
 
