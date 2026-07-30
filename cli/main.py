@@ -1329,83 +1329,55 @@ def _cmd_seo_report(args: argparse.Namespace, *, out) -> int:
       recorded explicitly, never fabricated).
     - 2 when ``--input`` is given but the file is missing / unparseable,
       or when ``--period-start``/``--period-end`` are malformed.
+
+    MKT-11A: this command is a thin adapter over
+    :func:`core.application.services.seo.build_seo_report`. Behaviour is
+    unchanged — see ``docs/MKT-11A-Application-Services-Inventory.md``.
     """
-    import datetime as _datetime_mod
-
-    from core.memory import JsonFileMemory
-    from core.seo_intelligence import (
-        SEOEvidenceInput,
-        SEOIntelligenceReportBuilder,
-        render_markdown_seo_report,
-    )
-
-    evidence_input: SEOEvidenceInput | None = None
-    if getattr(args, "input", None):
-        input_path = Path(args.input)
-        if not input_path.exists():
-            print(f"error: file not found: {input_path}", file=out)
-            return 2
-        try:
-            raw = json.loads(input_path.read_text(encoding="utf-8"))
-            evidence_input = SEOEvidenceInput.model_validate(raw)
-        except Exception as e:  # noqa: BLE001 — surface as a CLI error, not a crash
-            print(f"error: invalid --input file {input_path}: {e}", file=out)
-            return 2
-
-    period_start: _datetime_mod.date | None = None
-    period_end: _datetime_mod.date | None = None
-    if getattr(args, "start_date", None):
-        try:
-            period_start = _datetime_mod.date.fromisoformat(args.start_date)
-        except ValueError:
-            print(f"error: invalid --start-date {args.start_date!r}; expected YYYY-MM-DD", file=out)
-            return 2
-    if getattr(args, "end_date", None):
-        try:
-            period_end = _datetime_mod.date.fromisoformat(args.end_date)
-        except ValueError:
-            print(f"error: invalid --end-date {args.end_date!r}; expected YYYY-MM-DD", file=out)
-            return 2
-
-    memory = JsonFileMemory(Path(args.root))
-    builder = SEOIntelligenceReportBuilder(memory=memory)
-    pack = builder.build(
-        args.client,
-        period_start=period_start,
-        period_end=period_end,
-        period_label=getattr(args, "period_label", None) or None,
-        evidence_input=evidence_input,
-    )
+    from core.application import ErrorCode, OperationContext
+    from core.application.services.seo import build_seo_report
 
     outputs_dir = Path(args.output_dir)
     md_path = outputs_dir / "seo-intelligence-report.md"
     json_path = outputs_dir / "seo-intelligence-report.json"
 
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = build_seo_report(
+        ctx,
+        start_date=getattr(args, "start_date", None),
+        end_date=getattr(args, "end_date", None),
+        period_label=getattr(args, "period_label", None) or None,
+        input_path=getattr(args, "input", None),
+        overwrite=getattr(args, "overwrite", False),
+        dry_run=getattr(args, "dry_run", False),
+    )
+
+    if not result.ok:
+        assert result.error is not None
+        if result.error.code is ErrorCode.ALREADY_EXISTS:
+            print(
+                f"error: output already exists at {outputs_dir} — pass --overwrite to replace it",
+                file=out,
+            )
+        else:
+            print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
     if getattr(args, "dry_run", False):
         payload = {
             "dry_run": True,
             "report_id": pack.report_id,
             "client_slug": pack.client_slug,
-            "would_write": [str(md_path), str(json_path)],
+            "would_write": [str(a.path) for a in result.artifacts],
             "facts_count": pack.executive_summary.facts_count,
             "hypotheses_count": pack.executive_summary.hypotheses_count,
             "missing_evidence_count": len(pack.missing_evidence),
         }
         print(json.dumps(payload, indent=2, default=str), file=out)
         return 0
-
-    if not getattr(args, "overwrite", False) and (md_path.exists() or json_path.exists()):
-        print(
-            f"error: output already exists at {outputs_dir} — pass --overwrite to replace it",
-            file=out,
-        )
-        return 2
-
-    builder.persist(pack)
-
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(render_markdown_seo_report(pack), encoding="utf-8")
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
 
     payload = {
         "report_id": pack.report_id,
@@ -1420,6 +1392,131 @@ def _cmd_seo_report(args: argparse.Namespace, *, out) -> int:
         "missing_evidence_count": len(pack.missing_evidence),
         "markdown_path": str(md_path),
         "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
+    """List every ApprovalPack across all tenants that is pending
+    review or currently blocks publish (MKT-11A, D-11.5).
+
+    Cross-tenant by design — an Approval Queue has no meaning scoped to
+    a single client. Read-only.
+
+    Exit codes:
+    - 0 always (an empty queue is not an error).
+    """
+    from core.application.services import approvals
+
+    result = approvals.list_pending(root=Path(args.root))
+    payload = {
+        "count": len(result.data),
+        "pending": [
+            {
+                "client_slug": row.client_slug,
+                "pack_id": row.pack_id,
+                "state": row.state.value,
+                "overall_severity": row.overall_severity,
+                "blocks_publish": row.blocks_publish,
+            }
+            for row in result.data
+        ],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_approvals_show(args: argparse.Namespace, *, out) -> int:
+    """Show the current ApprovalPack for one client (MKT-11A, D-11.5).
+
+    Exit codes:
+    - 0 on success.
+    - 2 when there is no ApprovalPack for the client.
+    """
+    from core.application import OperationContext
+    from core.application.services import approvals
+
+    ctx = OperationContext(client_slug=args.client, root=Path(args.root))
+    result = approvals.show(ctx)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    print(pack.to_json(indent=2), file=out)
+    return 0
+
+
+def _cmd_approve(args: argparse.Namespace, *, out) -> int:
+    """Approve the current ApprovalPack for one client (MKT-11A, D-11.5).
+
+    Wraps :meth:`core.approval.ApprovalPackBuilder.approve` — idempotent
+    when the pack is already APPROVED (exit 0, warning surfaced).
+
+    Exit codes:
+    - 0 on success (including the idempotent no-op case).
+    - 2 when there is no ApprovalPack, or the transition is invalid
+      (e.g. the pack is already REJECTED).
+    """
+    from core.application import OperationContext
+    from core.application.services import approvals
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    result = approvals.approve(ctx, notes=getattr(args, "notes", None) or None)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "state": pack.state.value,
+        "blocks_publish": pack.blocks_publish,
+        "audit_event_id": result.audit_event_id,
+        "warnings": [w.message for w in result.warnings],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_reject(args: argparse.Namespace, *, out) -> int:
+    """Reject the current ApprovalPack for one client (MKT-11A, D-11.5).
+
+    Wraps :meth:`core.approval.ApprovalPackBuilder.reject`. ``--reason``
+    is mandatory — enforced at the application layer. Idempotent when the
+    pack is already REJECTED (exit 0, warning surfaced).
+
+    Exit codes:
+    - 0 on success (including the idempotent no-op case).
+    - 2 when ``--reason`` is empty, there is no ApprovalPack, or the
+      transition is invalid (e.g. the pack is already APPROVED).
+    """
+    from core.application import OperationContext
+    from core.application.services import approvals
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    result = approvals.reject(ctx, reason=args.reason)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "state": pack.state.value,
+        "blocks_publish": pack.blocks_publish,
+        "audit_event_id": result.audit_event_id,
+        "warnings": [w.message for w in result.warnings],
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
     return 0
@@ -2567,6 +2664,72 @@ def _build_parser() -> argparse.ArgumentParser:
         help="build the report without persisting or writing output files",
     )
     p_seo.set_defaults(func=_cmd_seo_report)
+
+    # approvals (MKT-11A, D-11.5)
+    p_appr = subs.add_parser("approvals", help="approval queue operations")
+    appr_subs = p_appr.add_subparsers(dest="approvals_command", required=True)
+
+    p_appr_list = appr_subs.add_parser(
+        "list",
+        help="list ApprovalPacks pending review or blocking publish, across all clients",
+    )
+    p_appr_list.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_appr_list.set_defaults(func=_cmd_approvals_list)
+
+    p_appr_show = appr_subs.add_parser(
+        "show", help="show the current ApprovalPack for one client",
+    )
+    p_appr_show.add_argument("--client", required=True, help="client slug")
+    p_appr_show.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_appr_show.set_defaults(func=_cmd_approvals_show)
+
+    # approve (MKT-11A, D-11.5)
+    p_approve = subs.add_parser(
+        "approve", help="approve the current ApprovalPack for one client",
+    )
+    p_approve.add_argument("--client", required=True, help="client slug")
+    p_approve.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_approve.add_argument(
+        "--actor",
+        default="unknown",
+        help="reviewer identity recorded on the approval decision",
+    )
+    p_approve.add_argument(
+        "--notes", default=None, help="optional reviewer notes",
+    )
+    p_approve.set_defaults(func=_cmd_approve)
+
+    # reject (MKT-11A, D-11.5)
+    p_reject = subs.add_parser(
+        "reject", help="reject the current ApprovalPack for one client",
+    )
+    p_reject.add_argument("--client", required=True, help="client slug")
+    p_reject.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_reject.add_argument(
+        "--actor",
+        default="unknown",
+        help="reviewer identity recorded on the rejection decision",
+    )
+    p_reject.add_argument(
+        "--reason", required=True, help="mandatory reason for rejection",
+    )
+    p_reject.set_defaults(func=_cmd_reject)
 
     # image-jobs (MKT-7A)
     p_imgj = subs.add_parser(

@@ -1671,3 +1671,44 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
   build on the period-snapshot primitive shipped here, though the comparison
   logic itself (deltas, cycle-vs-cycle views) is still NOT implemented and
   remains open at those items.
+
+---
+
+## From MKT-11A (application services foundation)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11A
+- **Resolved at:** MKT-11A (same block) — new `core/application/` package
+  (`context.py` → `OperationContext`, `result.py` → `OperationResult` /
+  `OperationError` / `Artifact` / `OperationWarning`, `artifacts.py` →
+  centralized, path-traversal-guarded `write_artifacts`,
+  `services/{seo,analytics,approvals}.py`). `mkt seo-report` migrated
+  behaviour-identically (its 25 pre-existing tests pass unmodified). New
+  commands `mkt approvals list` / `mkt approvals show` / `mkt approve` /
+  `mkt reject` wrap the existing `ApprovalPackBuilder.approve()/reject()`
+  domain methods — no duplication — with two policy decisions enforced at
+  the application layer per D-11.5: idempotent success (with warning, no
+  new audit event) when a pack is already in the requested terminal
+  state, and a mandatory non-empty `--reason` to reject. Read-only
+  Analytics snapshot services (`list_snapshots` / `get_snapshot` /
+  `get_latest_snapshot`) expose the MKT-10B `snapshot_repo` helpers
+  through the application layer for the first time — no CLI command
+  added (none existed to preserve).
+- **Notes:** 75 new tests (`tests/application/`, `tests/cli/test_cli_approvals.py`).
+  Full suite green (1893 passed), ruff clean, `portal/` untouched (its 52
+  read-only tests re-verified unmodified), ATLAS untouched. Full
+  inventory + migration rationale in
+  `docs/MKT-11A-Application-Services-Inventory.md`; target architecture
+  in `docs/MKT-11-Control-Center-Architecture.md`.
+- **Deliberately NOT done in this block** (see inventory §6 for the
+  complete list): the other ~26 CLI commands remain unmigrated
+  (`run-campaign` explicitly excluded — needs the job contract from
+  D-11.7 first); the flat-vs-per-client output layout inconsistency
+  found in the inventory (F-1) was preserved, not unified — unifying it
+  is a behaviour change and belongs in its own block; the 3 CLI-side
+  hand-rolled audit builders (`build-tasks`, `analyze-metrics`, `intake`)
+  were not migrated into their domain services; the audit reader
+  (`read_audit_events`) was not hardened (D-11.8 — still loads every
+  JSONL file into memory, still raises on the first corrupt line); no
+  job contract for long-running operations (D-11.7); no FastAPI, no
+  Next.js, no Control Center UI (`control_center/` does not exist yet —
+  that is MKT-11B+).
