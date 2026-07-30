@@ -1315,6 +1315,116 @@ def _cmd_ads_analyze(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_seo_report(args: argparse.Namespace, *, out) -> int:
+    """Build the SEO Intelligence Report Pack (MKT-10C).
+
+    Deterministic consolidation of ClientIntake + MetricsSnapshot (GA4 /
+    Search Console) + an optional operator-supplied evidence file
+    (``--input``) into an auditable SEO diagnosis + roadmap report.
+
+    No scraping. No external API. No LLM. No site mutation.
+
+    Exit codes:
+    - 0 on success (even with zero evidence — missing categories are
+      recorded explicitly, never fabricated).
+    - 2 when ``--input`` is given but the file is missing / unparseable,
+      or when ``--period-start``/``--period-end`` are malformed.
+    """
+    import datetime as _datetime_mod
+
+    from core.memory import JsonFileMemory
+    from core.seo_intelligence import (
+        SEOEvidenceInput,
+        SEOIntelligenceReportBuilder,
+        render_markdown_seo_report,
+    )
+
+    evidence_input: SEOEvidenceInput | None = None
+    if getattr(args, "input", None):
+        input_path = Path(args.input)
+        if not input_path.exists():
+            print(f"error: file not found: {input_path}", file=out)
+            return 2
+        try:
+            raw = json.loads(input_path.read_text(encoding="utf-8"))
+            evidence_input = SEOEvidenceInput.model_validate(raw)
+        except Exception as e:  # noqa: BLE001 — surface as a CLI error, not a crash
+            print(f"error: invalid --input file {input_path}: {e}", file=out)
+            return 2
+
+    period_start: _datetime_mod.date | None = None
+    period_end: _datetime_mod.date | None = None
+    if getattr(args, "start_date", None):
+        try:
+            period_start = _datetime_mod.date.fromisoformat(args.start_date)
+        except ValueError:
+            print(f"error: invalid --start-date {args.start_date!r}; expected YYYY-MM-DD", file=out)
+            return 2
+    if getattr(args, "end_date", None):
+        try:
+            period_end = _datetime_mod.date.fromisoformat(args.end_date)
+        except ValueError:
+            print(f"error: invalid --end-date {args.end_date!r}; expected YYYY-MM-DD", file=out)
+            return 2
+
+    memory = JsonFileMemory(Path(args.root))
+    builder = SEOIntelligenceReportBuilder(memory=memory)
+    pack = builder.build(
+        args.client,
+        period_start=period_start,
+        period_end=period_end,
+        period_label=getattr(args, "period_label", None) or None,
+        evidence_input=evidence_input,
+    )
+
+    outputs_dir = Path(args.output_dir)
+    md_path = outputs_dir / "seo-intelligence-report.md"
+    json_path = outputs_dir / "seo-intelligence-report.json"
+
+    if getattr(args, "dry_run", False):
+        payload = {
+            "dry_run": True,
+            "report_id": pack.report_id,
+            "client_slug": pack.client_slug,
+            "would_write": [str(md_path), str(json_path)],
+            "facts_count": pack.executive_summary.facts_count,
+            "hypotheses_count": pack.executive_summary.hypotheses_count,
+            "missing_evidence_count": len(pack.missing_evidence),
+        }
+        print(json.dumps(payload, indent=2, default=str), file=out)
+        return 0
+
+    if not getattr(args, "overwrite", False) and (md_path.exists() or json_path.exists()):
+        print(
+            f"error: output already exists at {outputs_dir} — pass --overwrite to replace it",
+            file=out,
+        )
+        return 2
+
+    builder.persist(pack)
+
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_markdown_seo_report(pack), encoding="utf-8")
+    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+
+    payload = {
+        "report_id": pack.report_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "period_start": str(pack.period_start) if pack.period_start else None,
+        "period_end": str(pack.period_end) if pack.period_end else None,
+        "period_label": pack.period_label,
+        "facts_count": pack.executive_summary.facts_count,
+        "hypotheses_count": pack.executive_summary.hypotheses_count,
+        "recommendations_count": pack.executive_summary.recommendations_count,
+        "missing_evidence_count": len(pack.missing_evidence),
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_ads_feedback(args: argparse.Namespace, *, out) -> int:
     """Bridge the Google Ads insight pack into the feedback loop
     (MKT-6G).
@@ -2397,6 +2507,66 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the bridge pack MD/JSON are written",
     )
     p_adsfb.set_defaults(func=_cmd_ads_feedback)
+
+    # seo-report (MKT-10C)
+    p_seo = subs.add_parser(
+        "seo-report",
+        help=(
+            "build the SEO Intelligence Report Pack — deterministic "
+            "consolidation of ClientIntake + GA4/Search Console metrics + "
+            "operator-supplied evidence. No scraping, no external API, "
+            "no LLM, no site mutation."
+        ),
+    )
+    p_seo.add_argument("--client", required=True, help="client slug")
+    p_seo.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_seo.add_argument(
+        "--start-date",
+        default=None,
+        dest="start_date",
+        metavar="YYYY-MM-DD",
+        help="start of the reporting period (enables period-scoped persistence)",
+    )
+    p_seo.add_argument(
+        "--end-date",
+        default=None,
+        dest="end_date",
+        metavar="YYYY-MM-DD",
+        help="end of the reporting period (required when --start-date is set)",
+    )
+    p_seo.add_argument(
+        "--period-label",
+        default=None,
+        help="human-readable period label, e.g. '2024-W24' or '2024-Q2'",
+    )
+    p_seo.add_argument(
+        "--input",
+        default=None,
+        help="path to a SEOEvidenceInput JSON file (keyword research, "
+        "competitors, URL structure, locales, technical notes)",
+    )
+    p_seo.add_argument(
+        "--output-dir",
+        default="outputs",
+        dest="output_dir",
+        help="directory where the report MD/JSON are written",
+    )
+    p_seo.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="overwrite an existing report at --output-dir",
+    )
+    p_seo.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="build the report without persisting or writing output files",
+    )
+    p_seo.set_defaults(func=_cmd_seo_report)
 
     # image-jobs (MKT-7A)
     p_imgj = subs.add_parser(
