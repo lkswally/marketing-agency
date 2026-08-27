@@ -37,6 +37,12 @@ class ErrorCode(StrEnum):
     INVALID_INPUT = "invalid_input"
     """Malformed argument — bad date, bad JSON, failed model validation."""
 
+    UNKNOWN_OPERATION = "unknown_operation"
+    """A job named an operation the registry has no spec for (MKT-11C).
+    Kept distinct from INVALID_INPUT — a bad param value and a bad
+    operation name are different classes of caller mistake, even though
+    both currently map to the same exit code (2)."""
+
     INVALID_STATE_TRANSITION = "invalid_state_transition"
     """Domain state machine refused the transition (e.g. re-reject an
     already-APPROVED pack)."""

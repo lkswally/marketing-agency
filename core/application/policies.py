@@ -50,4 +50,34 @@ def check_can_decide_approval(ctx: OperationContext) -> OperationResult | None:
     )
 
 
-__all__ = ["check_can_decide_approval"]
+_ALLOWED_TO_EXECUTE_JOBS = frozenset({
+    OperationRole.OPERATOR,
+    OperationRole.APPROVER,
+    OperationRole.ADMIN,
+})
+"""Same set as approvals (MKT-11B), kept as a separate constant — see
+:func:`check_can_execute_job` docstring for why the check is a distinct
+function rather than a reuse of :func:`check_can_decide_approval`."""
+
+
+def check_can_execute_job(ctx: OperationContext) -> OperationResult | None:
+    """Return a ``PERMISSION_DENIED`` error result when ``ctx.role`` may
+    not submit or run a job; ``None`` when it may.
+
+    Deliberately a separate function from :func:`check_can_decide_approval`
+    (MKT-11B) even though the allowed role set is identical today — job
+    execution and approval decisions are different capabilities that may
+    need to diverge (e.g. a future CRITICAL-risk job requiring APPROVER
+    while a LOW-risk one allows OPERATOR) without one policy's change
+    silently affecting the other.
+    """
+    if ctx.role in _ALLOWED_TO_EXECUTE_JOBS:
+        return None
+    return OperationResult.error_result(
+        code=ErrorCode.PERMISSION_DENIED,
+        message=f"role {ctx.role.value!r} is not authorized to execute jobs",
+        remediation="use an actor with role 'operator', 'approver', or 'admin'",
+    )
+
+
+__all__ = ["check_can_decide_approval", "check_can_execute_job"]

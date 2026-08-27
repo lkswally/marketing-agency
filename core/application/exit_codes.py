@@ -30,14 +30,20 @@ class ExitCode(IntEnum):
     INVALID_STATE_TRANSITION = 4
     PERMISSION_DENIED = 5
     PERSISTENCE_ERROR = 6
+    JOB_FAILED = 7
+    """A job reached JobState.FAILED (MKT-11C) — a known, structured
+    outcome, not a CLI-adapter error. Distinct from UNEXPECTED: the job
+    system worked correctly and the *operation* failed."""
     UNEXPECTED = 70
     """Matches the BSD/sysexits.h ``EX_SOFTWARE`` convention — an
     unexpected internal failure, as opposed to a well-understood,
-    user-facing error condition (codes 2–6)."""
+    user-facing error condition (codes 2–7). Reserved exclusively for
+    that — a failed job is JOB_FAILED (7), never 70."""
 
 
 _ERROR_CODE_TO_EXIT_CODE: dict[ErrorCode, ExitCode] = {
     ErrorCode.INVALID_INPUT: ExitCode.INVALID_INPUT,
+    ErrorCode.UNKNOWN_OPERATION: ExitCode.INVALID_INPUT,
     ErrorCode.NOT_FOUND: ExitCode.NOT_FOUND,
     ErrorCode.INVALID_STATE_TRANSITION: ExitCode.INVALID_STATE_TRANSITION,
     ErrorCode.PERMISSION_DENIED: ExitCode.PERMISSION_DENIED,

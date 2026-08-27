@@ -1587,6 +1587,198 @@ def _cmd_reject(args: argparse.Namespace, *, out) -> int:
     return 0
 
 
+def _cmd_jobs_submit(args: argparse.Namespace, *, out) -> int:
+    """Submit a new QUEUED job for one client (MKT-11C).
+
+    Does not execute the job — pass ``--run`` to submit and execute in
+    the same call, or run it later with ``mkt jobs run``.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success.
+    - 2 when ``--params`` is not valid JSON, or fails the operation's
+      params contract, or the operation is unregistered.
+    - 5 when the actor's role is not authorized to execute jobs.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import jobs
+
+    try:
+        params = json.loads(args.params) if args.params else {}
+    except json.JSONDecodeError as e:
+        print(f"error: invalid --params JSON: {e}", file=out)
+        return 2
+
+    ctx_kwargs: dict = dict(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    correlation_id = getattr(args, "correlation_id", None)
+    if correlation_id:
+        ctx_kwargs["correlation_id"] = correlation_id
+    ctx = OperationContext(**ctx_kwargs)
+
+    result = jobs.submit_job(ctx, operation=args.operation, params=params)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    record = result.data
+    if getattr(args, "run", False):
+        run_result = jobs.run_job(ctx, job_id=record.job_id)
+        return _handle_run_result(run_result, out=out)
+
+    print(json.dumps(_job_payload(record), indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_run(args: argparse.Namespace, *, out) -> int:
+    """Execute a QUEUED job (MKT-11C). Idempotent on COMPLETED.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (including the idempotent no-op case).
+    - 3 when the job does not exist.
+    - 4 when the job is not in a runnable state (only QUEUED can run).
+    - 5 when the actor's role is not authorized to execute jobs.
+    - 6 when the persisted job exists but cannot be read back.
+    - 7 when the job runs and reaches FAILED.
+    """
+    from core.application import OperationContext
+    from core.application.services import jobs
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    result = jobs.run_job(ctx, job_id=args.job_id)
+    return _handle_run_result(result, out=out)
+
+
+def _handle_run_result(result, *, out) -> int:
+    """Shared exit-code logic for both ``jobs run`` and ``jobs submit
+    --run`` — a FAILED job gets its own exit code (7), distinct from the
+    generic error mapping, because the job system worked correctly and
+    only the operation failed."""
+    from core.application import exit_code_for
+    from core.application.exit_codes import ExitCode
+    from core.jobs import JobState
+
+    if not result.ok:
+        assert result.error is not None
+        if result.data is not None and getattr(result.data, "state", None) is JobState.FAILED:
+            # A FAILED job is a normal, structured outcome — the JSON
+            # payload already carries `error`, so stdout stays clean JSON
+            # (no extra "error: " line); the diagnostic goes to stderr.
+            print(f"job failed: {result.error.message}", file=sys.stderr)
+            print(json.dumps(_job_payload(result.data), indent=2, default=str), file=out)
+            return int(ExitCode.JOB_FAILED)
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    return _print_job_result(result, out=out)
+
+
+def _cmd_jobs_list(args: argparse.Namespace, *, out) -> int:
+    """List jobs for one client, newest first (MKT-11C). Read-only.
+
+    Exit codes:
+    - 0 always (an empty list is not an error).
+    """
+    from core.application import OperationContext
+    from core.application.services import jobs
+
+    ctx = OperationContext(client_slug=args.client, root=Path(args.root))
+    result = jobs.list_jobs(
+        ctx,
+        state=getattr(args, "status", None) or None,
+        operation=getattr(args, "operation", None) or None,
+        limit=getattr(args, "limit", None),
+    )
+    payload = {
+        "count": len(result.data),
+        "jobs": [_job_payload(r) for r in result.data],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_show(args: argparse.Namespace, *, out) -> int:
+    """Show one job by id (MKT-11C). Read-only.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success.
+    - 3 when the job does not exist.
+    - 6 when the persisted job exists but cannot be read back.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import jobs
+
+    ctx = OperationContext(client_slug=args.client, root=Path(args.root))
+    result = jobs.show_job(ctx, job_id=args.job_id)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+    print(json.dumps(_job_payload(result.data), indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_cancel(args: argparse.Namespace, *, out) -> int:
+    """Cancel a QUEUED or WAITING_APPROVAL job (MKT-11C). Idempotent on
+    CANCELLED. A RUNNING job cannot be cancelled by the inline runner —
+    see ``core.jobs.InlineJobRunner.cancel``.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (including the idempotent no-op case).
+    - 3 when the job does not exist.
+    - 4 when the job cannot be cancelled from its current state.
+    - 5 when the actor's role is not authorized.
+    - 6 when the persisted job exists but cannot be read back.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import jobs
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    result = jobs.cancel_job(ctx, job_id=args.job_id)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+    return _print_job_result(result, out=out)
+
+
+def _job_payload(record) -> dict:
+    return {
+        "job_id": record.job_id,
+        "client_slug": record.client_slug,
+        "operation": record.operation,
+        "state": record.state.value,
+        "correlation_id": record.correlation_id,
+        "attempt": record.attempt,
+        "created_at": str(record.created_at),
+        "started_at": str(record.started_at) if record.started_at else None,
+        "finished_at": str(record.finished_at) if record.finished_at else None,
+        "result_data": record.result_data,
+        "result_ref": record.result_ref,
+        "error": (
+            {"code": record.error.code.value, "message": record.error.message}
+            if record.error else None
+        ),
+        "approval_reason": record.approval_reason,
+    }
+
+
+def _print_job_result(result, *, out) -> int:
+    """Shared success-path printer for run/cancel — surfaces warnings on
+    stderr, the job record as clean JSON on stdout."""
+    for w in result.warnings:
+        print(f"WARNING: {w.message}", file=sys.stderr)
+    payload = _job_payload(result.data)
+    payload["warnings"] = [w.message for w in result.warnings]
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
 def _cmd_ads_feedback(args: argparse.Namespace, *, out) -> int:
     """Bridge the Google Ads insight pack into the feedback loop
     (MKT-6G).
@@ -2839,6 +3031,110 @@ def _build_parser() -> argparse.ArgumentParser:
         help="caller-supplied correlation id (default: auto-generated)",
     )
     p_reject.set_defaults(func=_cmd_reject)
+
+    # jobs (MKT-11C)
+    p_jobs = subs.add_parser("jobs", help="job execution operations")
+    jobs_subs = p_jobs.add_subparsers(dest="jobs_command", required=True)
+
+    p_jobs_submit = jobs_subs.add_parser(
+        "submit",
+        help=(
+            "submit a new QUEUED job. Registered operations in this "
+            "milestone are dev/test-only (demo.echo, demo.fail, "
+            "demo.needs_approval) — no production capability ships yet."
+        ),
+    )
+    p_jobs_submit.add_argument("--client", required=True, help="client slug")
+    p_jobs_submit.add_argument(
+        "--operation", required=True, help="registered operation id, e.g. demo.echo",
+    )
+    p_jobs_submit.add_argument(
+        "--params", default=None, help="JSON object of operation params",
+    )
+    p_jobs_submit.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_submit.add_argument(
+        "--actor", default="unknown", help="actor identity recorded on the job",
+    )
+    p_jobs_submit.add_argument(
+        "--correlation-id",
+        dest="correlation_id",
+        default=None,
+        help="caller-supplied correlation id (default: auto-generated)",
+    )
+    p_jobs_submit.add_argument(
+        "--run",
+        action="store_true",
+        help="execute the job immediately after submitting it",
+    )
+    p_jobs_submit.set_defaults(func=_cmd_jobs_submit)
+
+    p_jobs_run = jobs_subs.add_parser(
+        "run", help="execute a QUEUED job (idempotent on COMPLETED)",
+    )
+    p_jobs_run.add_argument("--client", required=True, help="client slug")
+    p_jobs_run.add_argument("--job-id", dest="job_id", required=True, help="job id")
+    p_jobs_run.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_run.add_argument(
+        "--actor", default="unknown", help="actor identity recorded on the run",
+    )
+    p_jobs_run.set_defaults(func=_cmd_jobs_run)
+
+    p_jobs_list = jobs_subs.add_parser(
+        "list", help="list jobs for one client, newest first",
+    )
+    p_jobs_list.add_argument("--client", required=True, help="client slug")
+    p_jobs_list.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_list.add_argument(
+        "--status", default=None, help="narrow to one JobState value",
+    )
+    p_jobs_list.add_argument(
+        "--operation", default=None, help="narrow to one operation id",
+    )
+    p_jobs_list.add_argument(
+        "--limit", type=int, default=None, help="cap the number of rows returned",
+    )
+    p_jobs_list.set_defaults(func=_cmd_jobs_list)
+
+    p_jobs_show = jobs_subs.add_parser("show", help="show one job by id")
+    p_jobs_show.add_argument("--client", required=True, help="client slug")
+    p_jobs_show.add_argument("--job-id", dest="job_id", required=True, help="job id")
+    p_jobs_show.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_show.set_defaults(func=_cmd_jobs_show)
+
+    p_jobs_cancel = jobs_subs.add_parser(
+        "cancel",
+        help=(
+            "cancel a QUEUED or WAITING_APPROVAL job. A RUNNING job cannot "
+            "be cancelled by the inline runner."
+        ),
+    )
+    p_jobs_cancel.add_argument("--client", required=True, help="client slug")
+    p_jobs_cancel.add_argument("--job-id", dest="job_id", required=True, help="job id")
+    p_jobs_cancel.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_cancel.add_argument(
+        "--actor", default="unknown", help="actor identity recorded on the cancellation",
+    )
+    p_jobs_cancel.set_defaults(func=_cmd_jobs_cancel)
 
     # image-jobs (MKT-7A)
     p_imgj = subs.add_parser(

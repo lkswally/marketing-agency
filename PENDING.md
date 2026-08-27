@@ -1769,3 +1769,71 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
   worker; FastAPI; Next.js/React; full authentication/sessions; the
   visual Approval Queue; automatic publishing; Market Intelligence;
   Learning Engine; Decision Engine.
+
+---
+
+## From MKT-11C (job execution foundation)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11C
+- **Resolved at:** MKT-11C (same block) — new `core/jobs/` package:
+  `models.py` (`JobRecord`, `JobState` 6-state machine incl.
+  `WAITING_APPROVAL`, `JobOutcome`/`JobOutcomeStatus` as the explicit
+  handler→runner contract — never inferred from strings), `registry.py`
+  (`JobRegistry`, `OperationSpec` — no dynamic import, no `eval`, no
+  resolution by function name; unregistered operation is
+  `ErrorCode.UNKNOWN_OPERATION`, distinct from `INVALID_INPUT`),
+  `repository.py` (one file per job, no singleton, full history,
+  `sanitize_params()` redaction hook for future credential-bearing
+  operations), `runner.py` (`InlineJobRunner` — synchronous, in-process,
+  never imports `argparse`). New `core/application/services/jobs.py`
+  wraps the runner in the `OperationResult` contract, reusing
+  `OperationContext` unchanged. New `core/application/policies.py::check_can_execute_job`
+  (same allowed-role set as approvals — `OPERATOR`/`APPROVER`/`ADMIN` —
+  kept as a separate function since the two capabilities may diverge
+  later). New `ErrorCode.UNKNOWN_OPERATION` and `ExitCode.JOB_FAILED = 7`
+  (additive; `70` stays reserved exclusively for truly unexpected
+  failures). CLI: `mkt jobs submit/run/list/show/cancel`.
+  `demo.echo`/`demo.fail`/`demo.needs_approval` are the only registered
+  operations, all `dev_only=True` — no production capability ships in
+  this block.
+- **Idempotency (confirmed policy):** re-running a `COMPLETED` job or
+  re-cancelling a `CANCELLED` job is `ok` + warning, no re-execution, no
+  new audit event. Any other non-`QUEUED` run or non-cancellable-state
+  cancel is `INVALID_STATE_TRANSITION`.
+- **Concurrency posture — documented, not simulated:** the
+  double-execution guard is check-then-act, protecting sequential CLI
+  use only, exactly like every other `Memory.v1` consumer (P-1D.3); it
+  does **not** protect concurrent processes. `cancel_requested` exists on
+  `JobRecord` for future non-inline runners but `InlineJobRunner` never
+  reads it — a `RUNNING` job cannot be cancelled by this runner (there is
+  no point in a synchronous execution where a flag could be observed),
+  and the CLI/service surface that limitation as `INVALID_STATE_TRANSITION`
+  with an explicit message rather than pretending to cancel.
+- **Corruption tolerance — honestly scoped, not oversold:** `Memory.list()`
+  bulk-reads every file for a kind in one pass with no per-file recovery
+  point, so a syntactically corrupted job file fails the *whole* listing
+  for that client (raises `JobPersistenceError`, never an unhandled
+  traceback) rather than being silently skipped. A file that is valid
+  JSON but fails the `JobRecord` schema *is* skipped per-entry, since
+  that check happens after the bulk read already succeeded.
+- **Notes:** 165 new tests (`tests/jobs/` — models incl. the full 6×6
+  transition matrix, registry, repository, runner; `tests/application/test_jobs_service.py`;
+  `tests/cli/test_cli_jobs.py`). Two bugs caught and fixed during
+  implementation before they shipped: (1) `submit()` originally
+  persisted the record before auditing it, so the "submitted" event's
+  `event_id` never made it into the saved file — fixed by auditing
+  first; (2) the FAILED-job CLI path originally printed a plain
+  `"error: ..."` line onto the same stdout as the JSON payload,
+  violating the clean-stdout contract — fixed by moving the diagnostic
+  to stderr and keeping stdout pure JSON (the payload's own `error`
+  field carries the message). Full suite green, ruff clean, approvals
+  (MKT-11A/11B, 75+43 tests) and portal (52 read-only pins) re-verified
+  unmodified, pipeline green, `run-campaign` untouched, ATLAS untouched.
+- **Deliberately NOT done in this block:** no external queue, no
+  threads, no multiprocessing, no Redis/Celery/Temporal/RabbitMQ; no
+  FastAPI, no frontend; no real crawling/HTTP (that is MKT-13A per the
+  master plan); no new LLM agents; `run-campaign` was not migrated onto
+  jobs (that is MKT-11D); the approval model was not redesigned (that is
+  MKT-12A per the master plan); no automatic publishing; no new external
+  write surface. `MKT-11D — migrate run-campaign onto jobs` is the
+  proposed next milestone, presented separately after this block closes.

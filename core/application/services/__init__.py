@@ -8,6 +8,6 @@ deliberately left unmigrated.
 
 from __future__ import annotations
 
-from . import analytics, approvals, seo
+from . import analytics, approvals, jobs, seo
 
-__all__ = ["analytics", "approvals", "seo"]
+__all__ = ["analytics", "approvals", "jobs", "seo"]
