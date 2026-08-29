@@ -36,7 +36,10 @@ from core.analytics.models import (
     METRICS_SNAPSHOT_KIND,
     SINGLETON_ID,
     MetricRow,
+    MetricSource,
     MetricsSnapshot,
+    snapshot_entity_id,
+    snapshot_id_from_period,
 )
 from core.contracts import AuditEventType, AuditTrailEvent
 from core.domain.base import utcnow
@@ -164,7 +167,9 @@ class AnalyticsFetchService:
         rows_rejected = len(reasons)
         identifier_fp = fingerprint_identifier(fetch_result.identifier)
 
-        snapshot = self._append_to_snapshot(client_slug, normalized)
+        snapshot = self._append_to_snapshot(
+            client_slug, normalized, start_date=start_date, end_date=end_date
+        )
         status = FetchStatus.OK if rows_rejected == 0 else FetchStatus.PARTIAL
 
         report = self._persist_report(
@@ -203,24 +208,52 @@ class AnalyticsFetchService:
         return [], [f"no normaliser for source {self._connector.source!r}"]
 
     def _append_to_snapshot(
-        self, client_slug: str, new_rows: list[MetricRow]
+        self,
+        client_slug: str,
+        new_rows: list[MetricRow],
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> MetricsSnapshot | None:
         if not new_rows:
             return None
-        snapshot = self._load_or_init_snapshot(client_slug)
-        snapshot.rows.extend(new_rows)
-        snapshot.updated_at = utcnow()
+        # Always update 'current' (backward compat).
+        current = self._load_or_init_snapshot(client_slug, SINGLETON_ID)
+        current.rows.extend(new_rows)
+        current.updated_at = utcnow()
         self._memory.put(
-            client_slug,
-            METRICS_SNAPSHOT_KIND,
-            SINGLETON_ID,
-            snapshot.model_dump(mode="json"),
+            client_slug, METRICS_SNAPSHOT_KIND, SINGLETON_ID,
+            current.model_dump(mode="json"),
         )
-        return snapshot
+        # Dual-write a period snapshot when start_date/end_date are known.
+        if start_date is not None and end_date is not None:
+            src_str = self._connector.source
+            try:
+                source = MetricSource(src_str)
+            except ValueError:
+                return current  # unsupported source enum — skip period snapshot
+            period_id = snapshot_entity_id(source, start_date, end_date)
+            period_snap = self._load_or_init_period_snapshot(
+                client_slug=client_slug,
+                entity_id=period_id,
+                source=source,
+                period_start=start_date,
+                period_end=end_date,
+            )
+            period_snap.rows.extend(new_rows)
+            period_snap.updated_at = utcnow()
+            self._memory.put(
+                client_slug, METRICS_SNAPSHOT_KIND, period_id,
+                period_snap.model_dump(mode="json"),
+            )
+            return period_snap
+        return current
 
-    def _load_or_init_snapshot(self, client_slug: str) -> MetricsSnapshot:
+    def _load_or_init_snapshot(
+        self, client_slug: str, entity_id: str = SINGLETON_ID
+    ) -> MetricsSnapshot:
         try:
-            raw = self._memory.get(client_slug, METRICS_SNAPSHOT_KIND, SINGLETON_ID)
+            raw = self._memory.get(client_slug, METRICS_SNAPSHOT_KIND, entity_id)
             return MetricsSnapshot.model_validate(raw)
         except EntityNotFound:
             now = utcnow()
@@ -229,6 +262,31 @@ class AnalyticsFetchService:
                 rows=[],
                 created_at=now,
                 updated_at=now,
+            )
+
+    def _load_or_init_period_snapshot(
+        self,
+        *,
+        client_slug: str,
+        entity_id: str,
+        source: MetricSource,
+        period_start: date,
+        period_end: date,
+    ) -> MetricsSnapshot:
+        try:
+            raw = self._memory.get(client_slug, METRICS_SNAPSHOT_KIND, entity_id)
+            return MetricsSnapshot.model_validate(raw)
+        except EntityNotFound:
+            now = utcnow()
+            return MetricsSnapshot(
+                snapshot_id=snapshot_id_from_period(source, period_start, period_end),
+                client_slug=client_slug,
+                rows=[],
+                created_at=now,
+                updated_at=now,
+                source=source,
+                period_start=period_start,
+                period_end=period_end,
             )
 
     def _finish_skipped(

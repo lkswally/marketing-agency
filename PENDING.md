@@ -1575,3 +1575,265 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Introduced:** MKT-9A
 - **Why deferred:** The user spec for MKT-9A explicitly forbade editing. A future block can add a feature-flagged edit mode that produces a diff + audit event without touching disk silently.
 - **Resolves at:** only when operators explicitly ask for it.
+
+---
+
+## From MKT-9B (Alpha Pilot 1 findings — LEXIA)  ✅ RESOLVED
+
+- **Introduced:** MKT-9B
+- **Resolved at:** MKT-9B (same block) — fixed `portal/pack_registry.py` kind
+  mismatches (`"strategy"` → `campaign_strategy_report`, `n8n_execution_plan`
+  → `n8n_execution_payload`) that made the portal report existing packs as
+  MISSING; `core/atlas_bridge/factory.py` now persists one JSON per handoff
+  kind (landing/branding/page_design) instead of all three overwriting a
+  shared `current.json`; templated-backend quality lift in
+  `core/strategy/templates.py` (executive summary weaves a preferred word,
+  channel rationales are no longer identical boilerplate, diagnosis surfaces
+  competitor names + forbidden words).
+- **Notes:** 14 net-new tests across 4 files. No new features, no new
+  external integrations — pure correctness + templated-quality fix triggered
+  by running the pipeline against the real `examples/intake/lexia.json`.
+  `data/lexia/` added to gitignore as the per-pilot working directory
+  (superseded by the broader `data/*` pattern from MKT-10A).
+
+## From MKT-9C (legal domain templated outputs)  ✅ RESOLVED
+
+- **Introduced:** MKT-9C
+- **Resolved at:** MKT-9C (same block) — added domain-aware extraction
+  helpers to `core/strategy/templates.py` (`_extract_product_features`,
+  `_detect_anti_pattern_tools`, `_extract_pains_from_intake`,
+  `_sanitize_forbidden`) so a real-business intake (LEXIA) produces
+  domain-specific pain points, headlines, keyword clusters, social copy and
+  reels voiceover instead of generic SaaS boilerplate.
+- **Notes:** 16 new tests in `tests/strategy/test_mkt9c_legal_domain_outputs.py`.
+  No new module, no new dependency, no API call, no Claude — pure templated
+  improvements over the existing deterministic backend.
+
+## From MKT-9D (industry-aware tone templates)  ✅ RESOLVED
+
+- **Introduced:** MKT-9D
+- **Resolved at:** MKT-9D (same block) — added a `"legal-pro"` tone family
+  and `tone_family_for_brief(brief)` three-tier detector (industry signal →
+  audience-description signal → brand-tone fallback) to
+  `core/strategy/style.py`; wired `generate_social_post_drafts`,
+  `generate_email_sequence` and `generate_reels_script_pack` in
+  `core/strategy/templates.py` to select copy per detected tone family so
+  legal/legaltech intakes stop reading like generic SaaS marketing.
+- **Notes:** 12 new tests in `tests/strategy/test_mkt9d_industry_tone.py`.
+  Existing `tone_adjective` / `tone_connector` / `tone_opener` helpers kept
+  unchanged for backward compat with non-strategy callers. No new modules,
+  no new dependencies, no Claude.
+
+---
+
+## From MKT-10X (market intelligence + UTM foundation)
+
+### P-10X.1 — Real intelligence adapters (no dry-run)
+- **Introduced:** MKT-10X
+- **Why deferred:** All 5 adapters (Google Trends, Reddit, YouTube, Meta Ads, competitor monitor) are dry-run only. No SDK imports, no HTTP, no credentials.
+- **Resolves at:** when the operator enables a specific integration.
+
+### P-10X.2 — UTM link validator
+- **Introduced:** MKT-10X
+- **Why deferred:** Generated UTM URLs are structurally valid but not tested against live pages. A future block could run a dry-run `HEAD` check on `final_url`.
+- **Resolves at:** when URL validation becomes operationally useful.
+
+---
+
+## From MKT-10Y (Windows pytest baseline stabilization)
+
+### P-10Y.1 — Linux / macOS baseline doc
+- **Introduced:** MKT-10Y
+- **Why deferred:** `docs/runtime/windows-test-baseline.md` covers Windows only. A parallel doc for POSIX does not exist because no POSIX-specific failures have been observed.
+- **Resolves at:** if a non-Windows contributor encounters a CI anomaly.
+
+---
+
+## From MKT-10B (time-ranged metrics snapshots)  ✅ RESOLVED
+
+- **Introduced:** MKT-10B
+- **Resolved at:** MKT-10B (same block) — `MetricsSnapshot` gained
+  `period_start` / `period_end` / `period_label` / `source` fields;
+  deterministic `snapshot_entity_id(source, period_start, period_end)` and
+  `snapshot_id_from_period(...)` (SHA-256) make re-imports of the same
+  period idempotent instead of duplicating; `core/analytics/snapshot_repo.py`
+  ships `list_metric_snapshots` / `load_metric_snapshot` /
+  `latest_metric_snapshot`; `AnalyticsImporter` and `AnalyticsFetchService`
+  dual-write — every import/fetch still updates the `"current"` singleton
+  (backward compat for the analyzer / feedback / iteration planners) AND, when
+  a period is known, the period-keyed snapshot. CLI: `--period-start` /
+  `--period-end` / `--period-label` on `import-metrics`; `--period-label` on
+  `analytics-fetch`.
+- **Notes:** 22 new tests in `tests/analytics/test_snapshot_repo.py`. Full
+  suite green (1792 passed), ruff clean, ATLAS untouched. This item directly
+  unblocks **P-6A.3** (multiple snapshots per client) — every deferred item
+  cross-referencing P-6A.3 (P-6B.3, P-6C.4, P-6F.8, P-6G.8, P-9A.4) can now
+  build on the period-snapshot primitive shipped here, though the comparison
+  logic itself (deltas, cycle-vs-cycle views) is still NOT implemented and
+  remains open at those items.
+
+---
+
+## From MKT-11A (application services foundation)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11A
+- **Resolved at:** MKT-11A (same block) — new `core/application/` package
+  (`context.py` → `OperationContext`, `result.py` → `OperationResult` /
+  `OperationError` / `Artifact` / `OperationWarning`, `artifacts.py` →
+  centralized, path-traversal-guarded `write_artifacts`,
+  `services/{seo,analytics,approvals}.py`). `mkt seo-report` migrated
+  behaviour-identically (its 25 pre-existing tests pass unmodified). New
+  commands `mkt approvals list` / `mkt approvals show` / `mkt approve` /
+  `mkt reject` wrap the existing `ApprovalPackBuilder.approve()/reject()`
+  domain methods — no duplication — with two policy decisions enforced at
+  the application layer per D-11.5: idempotent success (with warning, no
+  new audit event) when a pack is already in the requested terminal
+  state, and a mandatory non-empty `--reason` to reject. Read-only
+  Analytics snapshot services (`list_snapshots` / `get_snapshot` /
+  `get_latest_snapshot`) expose the MKT-10B `snapshot_repo` helpers
+  through the application layer for the first time — no CLI command
+  added (none existed to preserve).
+- **Notes:** 75 new tests (`tests/application/`, `tests/cli/test_cli_approvals.py`).
+  Full suite green (1893 passed), ruff clean, `portal/` untouched (its 52
+  read-only tests re-verified unmodified), ATLAS untouched. Full
+  inventory + migration rationale in
+  `docs/MKT-11A-Application-Services-Inventory.md`; target architecture
+  in `docs/MKT-11-Control-Center-Architecture.md`.
+- **Deliberately NOT done in this block** (see inventory §6 for the
+  complete list): the other ~26 CLI commands remain unmigrated
+  (`run-campaign` explicitly excluded — needs the job contract from
+  D-11.7 first); the flat-vs-per-client output layout inconsistency
+  found in the inventory (F-1) was preserved, not unified — unifying it
+  is a behaviour change and belongs in its own block; the 3 CLI-side
+  hand-rolled audit builders (`build-tasks`, `analyze-metrics`, `intake`)
+  were not migrated into their domain services; the audit reader
+  (`read_audit_events`) was not hardened (D-11.8 — still loads every
+  JSONL file into memory, still raises on the first corrupt line); no
+  job contract for long-running operations (D-11.7); no FastAPI, no
+  Next.js, no Control Center UI (`control_center/` does not exist yet —
+  that is MKT-11B+).
+
+---
+
+## From MKT-11B (approval operations)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11B
+- **Resolved at:** MKT-11B (same block) — extended the MKT-11A
+  `core/application/services/approvals.py` (not rebuilt; the inventory in
+  `docs/MKT-11B-Approval-Operations-Inventory.md` found `list_pending` /
+  `show` / `approve` / `reject` already shipped) with: **filters** on
+  `list_pending` — `client_slug`, `status` (bypasses the default
+  pending/blocked filter when given), `limit` — all backed by real
+  persistence fields; **`campaign_id` and date-range filters were
+  explicitly NOT implemented** — `ApprovalPack` has no `campaign_id`
+  field and only a single `"current"` pack per client exists (no
+  history), so those filters would have no honest semantics (documented
+  in the inventory, not silently skipped). **`--approval-id`** is
+  verification-only (D-11B.2) — compared against the loaded pack's
+  `pack_id`, mismatch → `NOT_FOUND`; no new index, no history, no new
+  persistence. **Role authorization** (D-11.6) via new
+  `core/application/policies.py::check_can_decide_approval` — `VIEWER`
+  and `ANALYST` are really blocked (`ErrorCode.PERMISSION_DENIED`);
+  `OPERATOR`/`APPROVER`/`ADMIN` are allowed. `OPERATOR` staying allowed
+  is a deliberate compatibility resolution, not an oversight: the
+  pre-11B contract already permitted any actor (nothing gated approval
+  before), and the MKT-11B role matrix's own carve-out — *"operator: no
+  puede aprobar salvo que el contrato actual lo permita"* — is satisfied
+  by that pre-existing reality. This keeps all 32 MKT-11A regression
+  tests green with zero modification. **`audit_event_id` bug fix**: MKT-11A
+  populated this field from `memory.last_audit_hash(...)` (the hash-chain
+  tail); it now holds the real `AuditTrailEvent.event_id`, read back via
+  `read_audit_events(...)` since `ApprovalPackBuilder._transition()`
+  doesn't return the event object it builds. New
+  `core/application/exit_codes.py` — first centralized, differentiated
+  exit-code table for the CLI (`0/2/3/4/5/6/70`); every other pre-11B
+  command keeps its own `0/2` mapping unchanged (additive, not
+  retroactive). CLI: `mkt approvals list --client/--status/--limit`,
+  `mkt approvals show --approval-id`, `mkt approve`/`mkt reject
+  --approval-id --correlation-id`.
+- **Notes:** 43 new tests (`tests/application/test_approvals_service_mkt11b.py`,
+  `tests/cli/test_cli_approvals_mkt11b.py`), kept in separate files from
+  the MKT-11A regression pins so the diff stays legible. Exactly 4
+  existing CLI assertions (in `tests/cli/test_cli_approvals.py`) were
+  updated — not their function names, not their setup, only the exit-code
+  literal (`2` → `3` or `4`) — because differentiating those codes was
+  this block's own explicit, approved requirement; every other assertion
+  in that file, and all 18 tests in `tests/application/test_approvals_service.py`,
+  are untouched. Full suite green, ruff clean, `portal/` untouched (its
+  read-only pins re-verified), `run-campaign` untouched, ATLAS untouched.
+- **Deliberately NOT done in this block:** `campaign_id` / date-range
+  filters (no domain field / no history — see above); a global `--role`
+  CLI flag (not in the confirmed CLI flag list; role is only exercised
+  directly at the service layer in this block's tests); `run-campaign`
+  as a service (still waiting on the job contract, D-11.7); jobs/queue/
+  worker; FastAPI; Next.js/React; full authentication/sessions; the
+  visual Approval Queue; automatic publishing; Market Intelligence;
+  Learning Engine; Decision Engine.
+
+---
+
+## From MKT-11C (job execution foundation)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11C
+- **Resolved at:** MKT-11C (same block) — new `core/jobs/` package:
+  `models.py` (`JobRecord`, `JobState` 6-state machine incl.
+  `WAITING_APPROVAL`, `JobOutcome`/`JobOutcomeStatus` as the explicit
+  handler→runner contract — never inferred from strings), `registry.py`
+  (`JobRegistry`, `OperationSpec` — no dynamic import, no `eval`, no
+  resolution by function name; unregistered operation is
+  `ErrorCode.UNKNOWN_OPERATION`, distinct from `INVALID_INPUT`),
+  `repository.py` (one file per job, no singleton, full history,
+  `sanitize_params()` redaction hook for future credential-bearing
+  operations), `runner.py` (`InlineJobRunner` — synchronous, in-process,
+  never imports `argparse`). New `core/application/services/jobs.py`
+  wraps the runner in the `OperationResult` contract, reusing
+  `OperationContext` unchanged. New `core/application/policies.py::check_can_execute_job`
+  (same allowed-role set as approvals — `OPERATOR`/`APPROVER`/`ADMIN` —
+  kept as a separate function since the two capabilities may diverge
+  later). New `ErrorCode.UNKNOWN_OPERATION` and `ExitCode.JOB_FAILED = 7`
+  (additive; `70` stays reserved exclusively for truly unexpected
+  failures). CLI: `mkt jobs submit/run/list/show/cancel`.
+  `demo.echo`/`demo.fail`/`demo.needs_approval` are the only registered
+  operations, all `dev_only=True` — no production capability ships in
+  this block.
+- **Idempotency (confirmed policy):** re-running a `COMPLETED` job or
+  re-cancelling a `CANCELLED` job is `ok` + warning, no re-execution, no
+  new audit event. Any other non-`QUEUED` run or non-cancellable-state
+  cancel is `INVALID_STATE_TRANSITION`.
+- **Concurrency posture — documented, not simulated:** the
+  double-execution guard is check-then-act, protecting sequential CLI
+  use only, exactly like every other `Memory.v1` consumer (P-1D.3); it
+  does **not** protect concurrent processes. `cancel_requested` exists on
+  `JobRecord` for future non-inline runners but `InlineJobRunner` never
+  reads it — a `RUNNING` job cannot be cancelled by this runner (there is
+  no point in a synchronous execution where a flag could be observed),
+  and the CLI/service surface that limitation as `INVALID_STATE_TRANSITION`
+  with an explicit message rather than pretending to cancel.
+- **Corruption tolerance — honestly scoped, not oversold:** `Memory.list()`
+  bulk-reads every file for a kind in one pass with no per-file recovery
+  point, so a syntactically corrupted job file fails the *whole* listing
+  for that client (raises `JobPersistenceError`, never an unhandled
+  traceback) rather than being silently skipped. A file that is valid
+  JSON but fails the `JobRecord` schema *is* skipped per-entry, since
+  that check happens after the bulk read already succeeded.
+- **Notes:** 165 new tests (`tests/jobs/` — models incl. the full 6×6
+  transition matrix, registry, repository, runner; `tests/application/test_jobs_service.py`;
+  `tests/cli/test_cli_jobs.py`). Two bugs caught and fixed during
+  implementation before they shipped: (1) `submit()` originally
+  persisted the record before auditing it, so the "submitted" event's
+  `event_id` never made it into the saved file — fixed by auditing
+  first; (2) the FAILED-job CLI path originally printed a plain
+  `"error: ..."` line onto the same stdout as the JSON payload,
+  violating the clean-stdout contract — fixed by moving the diagnostic
+  to stderr and keeping stdout pure JSON (the payload's own `error`
+  field carries the message). Full suite green, ruff clean, approvals
+  (MKT-11A/11B, 75+43 tests) and portal (52 read-only pins) re-verified
+  unmodified, pipeline green, `run-campaign` untouched, ATLAS untouched.
+- **Deliberately NOT done in this block:** no external queue, no
+  threads, no multiprocessing, no Redis/Celery/Temporal/RabbitMQ; no
+  FastAPI, no frontend; no real crawling/HTTP (that is MKT-13A per the
+  master plan); no new LLM agents; `run-campaign` was not migrated onto
+  jobs (that is MKT-11D); the approval model was not redesigned (that is
+  MKT-12A per the master plan); no automatic publishing; no new external
+  write surface. `MKT-11D — migrate run-campaign onto jobs` is the
+  proposed next milestone, presented separately after this block closes.

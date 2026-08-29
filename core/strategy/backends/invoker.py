@@ -147,9 +147,9 @@ class RefusingClaudeInvoker(ClaudeInvoker):
         context: ClaudeInvocationContext,
     ) -> str:
         raise NoRealInvokerError(
-            "No real Claude invoker is wired (MKT-4A ships infrastructure "
-            "only). Calls fall back to the templated backend. Wire a real "
-            "ClaudeInvoker in MKT-4B to enable LLM-backed content."
+            "No real Claude invoker is wired. Calls fall back to the templated "
+            "backend. Set ANTHROPIC_API_KEY and pass --backend claude to use "
+            "AnthropicSDKInvoker."
         )
 
 

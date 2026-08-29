@@ -15,6 +15,7 @@ No external API. No HTTP. No credential field on any model.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -33,6 +34,31 @@ OPTIMIZATION_RECOMMENDATION_PACK_VERSION = "optimization-recommendation-pack.v1"
 OPTIMIZATION_RECOMMENDATION_PACK_KIND = "optimization_recommendation_pack"
 
 SINGLETON_ID = "current"
+
+
+def snapshot_entity_id(
+    source: MetricSource, period_start: date, period_end: date
+) -> str:
+    """Deterministic memory entity_id for a period-scoped snapshot.
+
+    Format: ``{source}-{YYYY-MM-DD}-{YYYY-MM-DD}``.
+    Identical inputs always produce the same string so re-importing the
+    same (source, period) appends to the existing snapshot rather than
+    creating a new one.
+    """
+    return f"{source.value}-{period_start.isoformat()}-{period_end.isoformat()}"
+
+
+def snapshot_id_from_period(
+    source: MetricSource, period_start: date, period_end: date
+) -> str:
+    """Deterministic snapshot_id (model-level UUID substitute) for a period snapshot.
+
+    Uses SHA-256 of the entity_id so the model-level id is also stable
+    across re-imports of the same period, enabling idempotent round-trips.
+    """
+    key = snapshot_entity_id(source, period_start, period_end)
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
 # ============ Enums ============
@@ -114,7 +140,17 @@ class MetricRow(DomainModel):
 class MetricsSnapshot(DomainModel):
     """All normalised metric rows for one client. Imports append to
     this snapshot; a new ``mkt import-metrics`` invocation never
-    overwrites — the snapshot grows append-only."""
+    overwrites — the snapshot grows append-only.
+
+    **Time-ranged snapshots (MKT-10B)**
+
+    When ``period_start`` and ``period_end`` are set this snapshot
+    represents a specific time window for a single source. The memory
+    entity_id is ``snapshot_entity_id(source, period_start, period_end)``
+    instead of ``"current"``.  The legacy ``"current"`` singleton is
+    always kept up-to-date as a backward-compatible aggregate of all
+    imports regardless of period.
+    """
 
     contract_version: Literal["metrics-snapshot.v1"] = METRICS_SNAPSHOT_VERSION
     snapshot_id: str = Field(default_factory=new_id)
@@ -123,6 +159,15 @@ class MetricsSnapshot(DomainModel):
     created_at: datetime
     updated_at: datetime
     last_import_id: str | None = None
+
+    # --- period metadata (MKT-10B) ---
+    period_start: date | None = None
+    period_end: date | None = None
+    period_label: str | None = Field(default=None, max_length=64)
+    """Human-readable label, e.g. ``"2024-W24"``, ``"2024-Q2"``."""
+    source: MetricSource | None = None
+    """Primary source for source-scoped period snapshots. ``None`` for
+    the ``"current"`` aggregate which may span multiple sources."""
 
     @field_validator("client_slug")
     @classmethod
@@ -160,6 +205,14 @@ class AnalyticsImportReport(DomainModel):
     rows_rejected: int = Field(ge=0)
     rejected_reasons: list[str] = Field(default_factory=list)
     imported_at: datetime
+
+    # --- period metadata (MKT-10B) ---
+    period_start: date | None = None
+    period_end: date | None = None
+    period_label: str | None = Field(default=None, max_length=64)
+    period_snapshot_entity_id: str | None = None
+    """Memory entity_id of the period-scoped snapshot, if one was written.
+    ``None`` when no ``--period-start`` / ``--period-end`` were provided."""
 
     @field_validator("client_slug")
     @classmethod
@@ -309,4 +362,6 @@ __all__ = [
     "SEOOpportunity",
     "SEOOpportunityReport",
     "SINGLETON_ID",
+    "snapshot_entity_id",
+    "snapshot_id_from_period",
 ]

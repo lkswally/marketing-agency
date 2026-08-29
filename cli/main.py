@@ -844,6 +844,8 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
     - 0 on success (even with rejected rows; check the report)
     - 2 when the file is missing / unparseable
     """
+    import datetime as _datetime_mod
+
     from core.analytics import (
         AnalyticsImporter,
         ImporterError,
@@ -867,11 +869,32 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
         )
         return 2
 
+    # Parse optional period arguments.
+    period_start: _datetime_mod.date | None = None
+    period_end: _datetime_mod.date | None = None
+    if getattr(args, "period_start", None):
+        try:
+            period_start = _datetime_mod.date.fromisoformat(args.period_start)
+        except ValueError:
+            print(f"error: invalid --period-start {args.period_start!r}; expected YYYY-MM-DD", file=out)
+            return 2
+    if getattr(args, "period_end", None):
+        try:
+            period_end = _datetime_mod.date.fromisoformat(args.period_end)
+        except ValueError:
+            print(f"error: invalid --period-end {args.period_end!r}; expected YYYY-MM-DD", file=out)
+            return 2
+
     memory = JsonFileMemory(Path(args.root))
     importer = AnalyticsImporter(memory=memory)
     try:
         report, snapshot = importer.import_file(
-            client_slug=args.client, source=source, file_path=file_path
+            client_slug=args.client,
+            source=source,
+            file_path=file_path,
+            period_start=period_start,
+            period_end=period_end,
+            period_label=getattr(args, "period_label", None) or None,
         )
     except ImporterError as e:
         print(f"error: {e}", file=out)
@@ -893,6 +916,10 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
         "rows_rejected": report.rows_rejected,
         "snapshot_id": snapshot.snapshot_id,
         "snapshot_total_rows": snapshot.total_rows,
+        "period_start": str(report.period_start) if report.period_start else None,
+        "period_end": str(report.period_end) if report.period_end else None,
+        "period_label": report.period_label,
+        "period_snapshot_entity_id": report.period_snapshot_entity_id,
         "markdown_path": str(md_path),
         "json_path": str(json_path),
     }
@@ -1284,6 +1311,470 @@ def _cmd_ads_analyze(args: argparse.Namespace, *, out) -> int:
         "json_path": str(json_path),
         "rule_set_id": pack.rule_set_id,
     }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_seo_report(args: argparse.Namespace, *, out) -> int:
+    """Build the SEO Intelligence Report Pack (MKT-10C).
+
+    Deterministic consolidation of ClientIntake + MetricsSnapshot (GA4 /
+    Search Console) + an optional operator-supplied evidence file
+    (``--input``) into an auditable SEO diagnosis + roadmap report.
+
+    No scraping. No external API. No LLM. No site mutation.
+
+    Exit codes:
+    - 0 on success (even with zero evidence — missing categories are
+      recorded explicitly, never fabricated).
+    - 2 when ``--input`` is given but the file is missing / unparseable,
+      or when ``--period-start``/``--period-end`` are malformed.
+
+    MKT-11A: this command is a thin adapter over
+    :func:`core.application.services.seo.build_seo_report`. Behaviour is
+    unchanged — see ``docs/MKT-11A-Application-Services-Inventory.md``.
+    """
+    from core.application import ErrorCode, OperationContext
+    from core.application.services.seo import build_seo_report
+
+    outputs_dir = Path(args.output_dir)
+    md_path = outputs_dir / "seo-intelligence-report.md"
+    json_path = outputs_dir / "seo-intelligence-report.json"
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = build_seo_report(
+        ctx,
+        start_date=getattr(args, "start_date", None),
+        end_date=getattr(args, "end_date", None),
+        period_label=getattr(args, "period_label", None) or None,
+        input_path=getattr(args, "input", None),
+        overwrite=getattr(args, "overwrite", False),
+        dry_run=getattr(args, "dry_run", False),
+    )
+
+    if not result.ok:
+        assert result.error is not None
+        if result.error.code is ErrorCode.ALREADY_EXISTS:
+            print(
+                f"error: output already exists at {outputs_dir} — pass --overwrite to replace it",
+                file=out,
+            )
+        else:
+            print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    if getattr(args, "dry_run", False):
+        payload = {
+            "dry_run": True,
+            "report_id": pack.report_id,
+            "client_slug": pack.client_slug,
+            "would_write": [str(a.path) for a in result.artifacts],
+            "facts_count": pack.executive_summary.facts_count,
+            "hypotheses_count": pack.executive_summary.hypotheses_count,
+            "missing_evidence_count": len(pack.missing_evidence),
+        }
+        print(json.dumps(payload, indent=2, default=str), file=out)
+        return 0
+
+    payload = {
+        "report_id": pack.report_id,
+        "client_slug": pack.client_slug,
+        "contract_version": pack.contract_version,
+        "period_start": str(pack.period_start) if pack.period_start else None,
+        "period_end": str(pack.period_end) if pack.period_end else None,
+        "period_label": pack.period_label,
+        "facts_count": pack.executive_summary.facts_count,
+        "hypotheses_count": pack.executive_summary.hypotheses_count,
+        "recommendations_count": pack.executive_summary.recommendations_count,
+        "missing_evidence_count": len(pack.missing_evidence),
+        "markdown_path": str(md_path),
+        "json_path": str(json_path),
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
+    """List ApprovalPacks — pending review / blocking publish by default,
+    or narrowed with ``--client`` / ``--status`` / ``--limit`` (MKT-11A +
+    MKT-11B, D-11.5).
+
+    Cross-tenant by design when ``--client`` is omitted — an Approval
+    Queue has no meaning scoped to a single client. Read-only.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (an empty queue is not an error).
+    - 2 when ``--status`` is not a recognised state.
+    """
+    from core.application import ErrorCode, exit_code_for
+    from core.application.services import approvals
+
+    status = getattr(args, "status", None)
+    parsed_status = None
+    if status:
+        from core.approval import ApprovalState
+
+        try:
+            parsed_status = ApprovalState(status)
+        except ValueError:
+            print(
+                f"error: invalid --status {status!r}; expected one of "
+                f"{', '.join(s.value for s in ApprovalState)}",
+                file=out,
+            )
+            return exit_code_for(ErrorCode.INVALID_INPUT)
+
+    result = approvals.list_pending(
+        root=Path(args.root),
+        client_slug=getattr(args, "client", None) or None,
+        status=parsed_status,
+        limit=getattr(args, "limit", None),
+    )
+    payload = {
+        "count": len(result.data),
+        "pending": [
+            {
+                "client_slug": row.client_slug,
+                "pack_id": row.pack_id,
+                "state": row.state.value,
+                "overall_severity": row.overall_severity,
+                "blocks_publish": row.blocks_publish,
+            }
+            for row in result.data
+        ],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_approvals_show(args: argparse.Namespace, *, out) -> int:
+    """Show the current ApprovalPack for one client (MKT-11A + MKT-11B,
+    D-11.5).
+
+    ``--approval-id``, when given, is verified against the loaded pack's
+    ``pack_id`` (D-11B.2) — there is no per-approval index in the domain,
+    so this is a guard against acting on the wrong pack by typo, not a
+    lookup mechanism.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success.
+    - 3 when there is no ApprovalPack for the client, or ``--approval-id``
+      does not match the current pack.
+    - 6 when the persisted pack exists but cannot be read back (corrupted
+      JSON or a schema mismatch).
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import approvals
+
+    ctx = OperationContext(client_slug=args.client, root=Path(args.root))
+    result = approvals.show(ctx, approval_id=getattr(args, "approval_id", None) or None)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    pack = result.data
+    print(pack.to_json(indent=2), file=out)
+    return 0
+
+
+def _cmd_approve(args: argparse.Namespace, *, out) -> int:
+    """Approve the current ApprovalPack for one client (MKT-11A + MKT-11B,
+    D-11.5).
+
+    Wraps :meth:`core.approval.ApprovalPackBuilder.approve` — idempotent
+    when the pack is already APPROVED (exit 0, warning surfaced).
+    ``--approval-id`` is optional verification only (D-11B.2). Requires a
+    role authorized to decide (``operator`` / ``approver`` / ``admin`` —
+    see ``core.application.policies``); the CLI's ``OperationContext``
+    uses its default role, so this only matters for callers that build
+    their own context (a future API/worker).
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (including the idempotent no-op case).
+    - 3 when there is no ApprovalPack, or ``--approval-id`` mismatches.
+    - 4 when the transition is invalid (e.g. the pack is already REJECTED).
+    - 5 when the actor's role is not authorized to decide.
+    - 6 when the persisted pack exists but cannot be read back.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import approvals
+
+    ctx_kwargs: dict = dict(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    correlation_id = getattr(args, "correlation_id", None)
+    if correlation_id:
+        ctx_kwargs["correlation_id"] = correlation_id
+    ctx = OperationContext(**ctx_kwargs)
+
+    result = approvals.approve(
+        ctx,
+        notes=getattr(args, "notes", None) or None,
+        approval_id=getattr(args, "approval_id", None) or None,
+    )
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    pack = result.data
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "state": pack.state.value,
+        "blocks_publish": pack.blocks_publish,
+        "audit_event_id": result.audit_event_id,
+        "correlation_id": ctx.correlation_id,
+        "warnings": [w.message for w in result.warnings],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_reject(args: argparse.Namespace, *, out) -> int:
+    """Reject the current ApprovalPack for one client (MKT-11A + MKT-11B,
+    D-11.5).
+
+    Wraps :meth:`core.approval.ApprovalPackBuilder.reject`. ``--reason``
+    is mandatory — enforced at the application layer. Idempotent when the
+    pack is already REJECTED (exit 0, warning surfaced). ``--approval-id``
+    is optional verification only (D-11B.2).
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (including the idempotent no-op case).
+    - 2 when ``--reason`` is empty.
+    - 3 when there is no ApprovalPack, or ``--approval-id`` mismatches.
+    - 4 when the transition is invalid (e.g. the pack is already APPROVED).
+    - 5 when the actor's role is not authorized to decide.
+    - 6 when the persisted pack exists but cannot be read back.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import approvals
+
+    ctx_kwargs: dict = dict(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    correlation_id = getattr(args, "correlation_id", None)
+    if correlation_id:
+        ctx_kwargs["correlation_id"] = correlation_id
+    ctx = OperationContext(**ctx_kwargs)
+
+    result = approvals.reject(
+        ctx,
+        reason=args.reason,
+        approval_id=getattr(args, "approval_id", None) or None,
+    )
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    pack = result.data
+    payload = {
+        "pack_id": pack.pack_id,
+        "client_slug": pack.client_slug,
+        "state": pack.state.value,
+        "blocks_publish": pack.blocks_publish,
+        "audit_event_id": result.audit_event_id,
+        "correlation_id": ctx.correlation_id,
+        "warnings": [w.message for w in result.warnings],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_submit(args: argparse.Namespace, *, out) -> int:
+    """Submit a new QUEUED job for one client (MKT-11C).
+
+    Does not execute the job — pass ``--run`` to submit and execute in
+    the same call, or run it later with ``mkt jobs run``.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success.
+    - 2 when ``--params`` is not valid JSON, or fails the operation's
+      params contract, or the operation is unregistered.
+    - 5 when the actor's role is not authorized to execute jobs.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import jobs
+
+    try:
+        params = json.loads(args.params) if args.params else {}
+    except json.JSONDecodeError as e:
+        print(f"error: invalid --params JSON: {e}", file=out)
+        return 2
+
+    ctx_kwargs: dict = dict(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    correlation_id = getattr(args, "correlation_id", None)
+    if correlation_id:
+        ctx_kwargs["correlation_id"] = correlation_id
+    ctx = OperationContext(**ctx_kwargs)
+
+    result = jobs.submit_job(ctx, operation=args.operation, params=params)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    record = result.data
+    if getattr(args, "run", False):
+        run_result = jobs.run_job(ctx, job_id=record.job_id)
+        return _handle_run_result(run_result, out=out)
+
+    print(json.dumps(_job_payload(record), indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_run(args: argparse.Namespace, *, out) -> int:
+    """Execute a QUEUED job (MKT-11C). Idempotent on COMPLETED.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (including the idempotent no-op case).
+    - 3 when the job does not exist.
+    - 4 when the job is not in a runnable state (only QUEUED can run).
+    - 5 when the actor's role is not authorized to execute jobs.
+    - 6 when the persisted job exists but cannot be read back.
+    - 7 when the job runs and reaches FAILED.
+    """
+    from core.application import OperationContext
+    from core.application.services import jobs
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    result = jobs.run_job(ctx, job_id=args.job_id)
+    return _handle_run_result(result, out=out)
+
+
+def _handle_run_result(result, *, out) -> int:
+    """Shared exit-code logic for both ``jobs run`` and ``jobs submit
+    --run`` — a FAILED job gets its own exit code (7), distinct from the
+    generic error mapping, because the job system worked correctly and
+    only the operation failed."""
+    from core.application import exit_code_for
+    from core.application.exit_codes import ExitCode
+    from core.jobs import JobState
+
+    if not result.ok:
+        assert result.error is not None
+        if result.data is not None and getattr(result.data, "state", None) is JobState.FAILED:
+            # A FAILED job is a normal, structured outcome — the JSON
+            # payload already carries `error`, so stdout stays clean JSON
+            # (no extra "error: " line); the diagnostic goes to stderr.
+            print(f"job failed: {result.error.message}", file=sys.stderr)
+            print(json.dumps(_job_payload(result.data), indent=2, default=str), file=out)
+            return int(ExitCode.JOB_FAILED)
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+
+    return _print_job_result(result, out=out)
+
+
+def _cmd_jobs_list(args: argparse.Namespace, *, out) -> int:
+    """List jobs for one client, newest first (MKT-11C). Read-only.
+
+    Exit codes:
+    - 0 always (an empty list is not an error).
+    """
+    from core.application import OperationContext
+    from core.application.services import jobs
+
+    ctx = OperationContext(client_slug=args.client, root=Path(args.root))
+    result = jobs.list_jobs(
+        ctx,
+        state=getattr(args, "status", None) or None,
+        operation=getattr(args, "operation", None) or None,
+        limit=getattr(args, "limit", None),
+    )
+    payload = {
+        "count": len(result.data),
+        "jobs": [_job_payload(r) for r in result.data],
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_show(args: argparse.Namespace, *, out) -> int:
+    """Show one job by id (MKT-11C). Read-only.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success.
+    - 3 when the job does not exist.
+    - 6 when the persisted job exists but cannot be read back.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import jobs
+
+    ctx = OperationContext(client_slug=args.client, root=Path(args.root))
+    result = jobs.show_job(ctx, job_id=args.job_id)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+    print(json.dumps(_job_payload(result.data), indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_jobs_cancel(args: argparse.Namespace, *, out) -> int:
+    """Cancel a QUEUED or WAITING_APPROVAL job (MKT-11C). Idempotent on
+    CANCELLED. A RUNNING job cannot be cancelled by the inline runner —
+    see ``core.jobs.InlineJobRunner.cancel``.
+
+    Exit codes (see ``core.application.exit_codes.ExitCode``):
+    - 0 on success (including the idempotent no-op case).
+    - 3 when the job does not exist.
+    - 4 when the job cannot be cancelled from its current state.
+    - 5 when the actor's role is not authorized.
+    - 6 when the persisted job exists but cannot be read back.
+    """
+    from core.application import OperationContext, exit_code_for
+    from core.application.services import jobs
+
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+    )
+    result = jobs.cancel_job(ctx, job_id=args.job_id)
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return exit_code_for(result.error.code)
+    return _print_job_result(result, out=out)
+
+
+def _job_payload(record) -> dict:
+    return {
+        "job_id": record.job_id,
+        "client_slug": record.client_slug,
+        "operation": record.operation,
+        "state": record.state.value,
+        "correlation_id": record.correlation_id,
+        "attempt": record.attempt,
+        "created_at": str(record.created_at),
+        "started_at": str(record.started_at) if record.started_at else None,
+        "finished_at": str(record.finished_at) if record.finished_at else None,
+        "result_data": record.result_data,
+        "result_ref": record.result_ref,
+        "error": (
+            {"code": record.error.code.value, "message": record.error.message}
+            if record.error else None
+        ),
+        "approval_reason": record.approval_reason,
+    }
+
+
+def _print_job_result(result, *, out) -> int:
+    """Shared success-path printer for run/cancel — surfaces warnings on
+    stderr, the job record as clean JSON on stdout."""
+    for w in result.warnings:
+        print(f"WARNING: {w.message}", file=sys.stderr)
+    payload = _job_payload(result.data)
+    payload["warnings"] = [w.message for w in result.warnings]
     print(json.dumps(payload, indent=2, default=str), file=out)
     return 0
 
@@ -1692,6 +2183,50 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
         "intake_path": str(intake_path),
         "summary_path": str(md_path),
         "brief_path": str(brief_path) if brief_path else None,
+    }
+    print(json.dumps(payload, indent=2, default=str), file=out)
+    return 0
+
+
+def _cmd_utm_plan(args: argparse.Namespace, *, out) -> int:
+    """Generate a UTM tracking plan for a client.
+
+    Reads the existing ``campaign_strategy_report`` from memory and produces
+    UTM-tagged links for every channel/piece combination.
+
+    Output files:
+    - ``<outputs-dir>/<client>/utm-plan.md``
+    - ``<outputs-dir>/<client>/utm-plan.json``
+
+    Exit codes:
+    - 0 on success (including when no strategy report exists — a fallback
+      plan is generated with a recommendation to run the strategy first).
+    - 2 on argument or configuration error.
+    """
+    from core.intelligence.utm_builder import UTMBuilder, persist_utm_plan
+    from core.memory import JsonFileMemory
+
+    client_slug = args.client
+    memory = JsonFileMemory(Path(args.root))
+    outputs_root = Path(args.outputs_dir)
+    base_url = getattr(args, "base_url", None) or "https://example.com"
+    period = getattr(args, "period", None) or None
+
+    builder = UTMBuilder(memory, base_url=base_url)
+    plan = builder.build(client_slug, period=period)
+
+    md_path, json_path = persist_utm_plan(plan, memory, outputs_root=outputs_root)
+
+    payload = {
+        "status": "ok",
+        "client_slug": plan.client_slug,
+        "campaign_name": plan.campaign_name,
+        "period": plan.period,
+        "total_links": plan.total_links,
+        "channels_covered": plan.channels_covered,
+        "utm_plan_md": str(md_path),
+        "utm_plan_json": str(json_path),
+        "recommendations": len(plan.recommendations),
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
     return 0
@@ -2130,6 +2665,23 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outputs",
         help="directory where the import report MD/JSON are written",
     )
+    p_im.add_argument(
+        "--period-start",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="start of the reporting period (enables time-ranged snapshot)",
+    )
+    p_im.add_argument(
+        "--period-end",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="end of the reporting period (required when --period-start is set)",
+    )
+    p_im.add_argument(
+        "--period-label",
+        default=None,
+        help="human-readable period label, e.g. '2024-W24' or '2024-Q2'",
+    )
     p_im.set_defaults(func=_cmd_import_metrics)
 
     # analyze-metrics (MKT-6A)
@@ -2259,6 +2811,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outputs",
         help="directory where the fetch report MD/JSON are written",
     )
+    p_xfetch.add_argument(
+        "--period-label",
+        default=None,
+        help="human-readable period label for the auto-derived period snapshot",
+    )
     p_xfetch.set_defaults(func=_cmd_analytics_fetch)
 
     # ads-analyze (MKT-6F)
@@ -2304,6 +2861,280 @@ def _build_parser() -> argparse.ArgumentParser:
         help="directory where the bridge pack MD/JSON are written",
     )
     p_adsfb.set_defaults(func=_cmd_ads_feedback)
+
+    # seo-report (MKT-10C)
+    p_seo = subs.add_parser(
+        "seo-report",
+        help=(
+            "build the SEO Intelligence Report Pack — deterministic "
+            "consolidation of ClientIntake + GA4/Search Console metrics + "
+            "operator-supplied evidence. No scraping, no external API, "
+            "no LLM, no site mutation."
+        ),
+    )
+    p_seo.add_argument("--client", required=True, help="client slug")
+    p_seo.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_seo.add_argument(
+        "--start-date",
+        default=None,
+        dest="start_date",
+        metavar="YYYY-MM-DD",
+        help="start of the reporting period (enables period-scoped persistence)",
+    )
+    p_seo.add_argument(
+        "--end-date",
+        default=None,
+        dest="end_date",
+        metavar="YYYY-MM-DD",
+        help="end of the reporting period (required when --start-date is set)",
+    )
+    p_seo.add_argument(
+        "--period-label",
+        default=None,
+        help="human-readable period label, e.g. '2024-W24' or '2024-Q2'",
+    )
+    p_seo.add_argument(
+        "--input",
+        default=None,
+        help="path to a SEOEvidenceInput JSON file (keyword research, "
+        "competitors, URL structure, locales, technical notes)",
+    )
+    p_seo.add_argument(
+        "--output-dir",
+        default="outputs",
+        dest="output_dir",
+        help="directory where the report MD/JSON are written",
+    )
+    p_seo.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="overwrite an existing report at --output-dir",
+    )
+    p_seo.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="build the report without persisting or writing output files",
+    )
+    p_seo.set_defaults(func=_cmd_seo_report)
+
+    # approvals (MKT-11A, D-11.5)
+    p_appr = subs.add_parser("approvals", help="approval queue operations")
+    appr_subs = p_appr.add_subparsers(dest="approvals_command", required=True)
+
+    p_appr_list = appr_subs.add_parser(
+        "list",
+        help="list ApprovalPacks pending review or blocking publish, across all clients",
+    )
+    p_appr_list.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_appr_list.add_argument(
+        "--client", default=None, help="narrow to one client slug (default: all tenants)",
+    )
+    p_appr_list.add_argument(
+        "--status",
+        default=None,
+        help=(
+            "narrow to one ApprovalState (draft|needs_review|approved|rejected). "
+            "When given, replaces the default pending/blocked filter."
+        ),
+    )
+    p_appr_list.add_argument(
+        "--limit", type=int, default=None, help="cap the number of rows returned",
+    )
+    p_appr_list.set_defaults(func=_cmd_approvals_list)
+
+    p_appr_show = appr_subs.add_parser(
+        "show", help="show the current ApprovalPack for one client",
+    )
+    p_appr_show.add_argument("--client", required=True, help="client slug")
+    p_appr_show.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_appr_show.add_argument(
+        "--approval-id",
+        dest="approval_id",
+        default=None,
+        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+    )
+    p_appr_show.set_defaults(func=_cmd_approvals_show)
+
+    # approve (MKT-11A, D-11.5)
+    p_approve = subs.add_parser(
+        "approve", help="approve the current ApprovalPack for one client",
+    )
+    p_approve.add_argument("--client", required=True, help="client slug")
+    p_approve.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_approve.add_argument(
+        "--actor",
+        default="unknown",
+        help="reviewer identity recorded on the approval decision",
+    )
+    p_approve.add_argument(
+        "--notes", default=None, help="optional reviewer notes",
+    )
+    p_approve.add_argument(
+        "--approval-id",
+        dest="approval_id",
+        default=None,
+        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+    )
+    p_approve.add_argument(
+        "--correlation-id",
+        dest="correlation_id",
+        default=None,
+        help="caller-supplied correlation id (default: auto-generated)",
+    )
+    p_approve.set_defaults(func=_cmd_approve)
+
+    # reject (MKT-11A, D-11.5)
+    p_reject = subs.add_parser(
+        "reject", help="reject the current ApprovalPack for one client",
+    )
+    p_reject.add_argument("--client", required=True, help="client slug")
+    p_reject.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_reject.add_argument(
+        "--actor",
+        default="unknown",
+        help="reviewer identity recorded on the rejection decision",
+    )
+    p_reject.add_argument(
+        "--reason", required=True, help="mandatory reason for rejection",
+    )
+    p_reject.add_argument(
+        "--approval-id",
+        dest="approval_id",
+        default=None,
+        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+    )
+    p_reject.add_argument(
+        "--correlation-id",
+        dest="correlation_id",
+        default=None,
+        help="caller-supplied correlation id (default: auto-generated)",
+    )
+    p_reject.set_defaults(func=_cmd_reject)
+
+    # jobs (MKT-11C)
+    p_jobs = subs.add_parser("jobs", help="job execution operations")
+    jobs_subs = p_jobs.add_subparsers(dest="jobs_command", required=True)
+
+    p_jobs_submit = jobs_subs.add_parser(
+        "submit",
+        help=(
+            "submit a new QUEUED job. Registered operations in this "
+            "milestone are dev/test-only (demo.echo, demo.fail, "
+            "demo.needs_approval) — no production capability ships yet."
+        ),
+    )
+    p_jobs_submit.add_argument("--client", required=True, help="client slug")
+    p_jobs_submit.add_argument(
+        "--operation", required=True, help="registered operation id, e.g. demo.echo",
+    )
+    p_jobs_submit.add_argument(
+        "--params", default=None, help="JSON object of operation params",
+    )
+    p_jobs_submit.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_submit.add_argument(
+        "--actor", default="unknown", help="actor identity recorded on the job",
+    )
+    p_jobs_submit.add_argument(
+        "--correlation-id",
+        dest="correlation_id",
+        default=None,
+        help="caller-supplied correlation id (default: auto-generated)",
+    )
+    p_jobs_submit.add_argument(
+        "--run",
+        action="store_true",
+        help="execute the job immediately after submitting it",
+    )
+    p_jobs_submit.set_defaults(func=_cmd_jobs_submit)
+
+    p_jobs_run = jobs_subs.add_parser(
+        "run", help="execute a QUEUED job (idempotent on COMPLETED)",
+    )
+    p_jobs_run.add_argument("--client", required=True, help="client slug")
+    p_jobs_run.add_argument("--job-id", dest="job_id", required=True, help="job id")
+    p_jobs_run.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_run.add_argument(
+        "--actor", default="unknown", help="actor identity recorded on the run",
+    )
+    p_jobs_run.set_defaults(func=_cmd_jobs_run)
+
+    p_jobs_list = jobs_subs.add_parser(
+        "list", help="list jobs for one client, newest first",
+    )
+    p_jobs_list.add_argument("--client", required=True, help="client slug")
+    p_jobs_list.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_list.add_argument(
+        "--status", default=None, help="narrow to one JobState value",
+    )
+    p_jobs_list.add_argument(
+        "--operation", default=None, help="narrow to one operation id",
+    )
+    p_jobs_list.add_argument(
+        "--limit", type=int, default=None, help="cap the number of rows returned",
+    )
+    p_jobs_list.set_defaults(func=_cmd_jobs_list)
+
+    p_jobs_show = jobs_subs.add_parser("show", help="show one job by id")
+    p_jobs_show.add_argument("--client", required=True, help="client slug")
+    p_jobs_show.add_argument("--job-id", dest="job_id", required=True, help="job id")
+    p_jobs_show.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_show.set_defaults(func=_cmd_jobs_show)
+
+    p_jobs_cancel = jobs_subs.add_parser(
+        "cancel",
+        help=(
+            "cancel a QUEUED or WAITING_APPROVAL job. A RUNNING job cannot "
+            "be cancelled by the inline runner."
+        ),
+    )
+    p_jobs_cancel.add_argument("--client", required=True, help="client slug")
+    p_jobs_cancel.add_argument("--job-id", dest="job_id", required=True, help="job id")
+    p_jobs_cancel.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_cancel.add_argument(
+        "--actor", default="unknown", help="actor identity recorded on the cancellation",
+    )
+    p_jobs_cancel.set_defaults(func=_cmd_jobs_cancel)
 
     # image-jobs (MKT-7A)
     p_imgj = subs.add_parser(
@@ -2477,6 +3308,35 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_rc.set_defaults(func=_cmd_run_campaign)
+
+    # utm-plan
+    p_utm = subs.add_parser(
+        "utm-plan",
+        help="generate a UTM tracking plan from the client's strategy report",
+    )
+    p_utm.add_argument("--client", required=True, help="client slug")
+    p_utm.add_argument(
+        "--root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_utm.add_argument(
+        "--outputs-dir",
+        default="outputs",
+        help="directory where utm-plan.md and utm-plan.json are written (default: outputs/)",
+    )
+    p_utm.add_argument(
+        "--base-url",
+        default="https://example.com",
+        dest="base_url",
+        help="base landing page URL for UTM link generation (default: https://example.com)",
+    )
+    p_utm.add_argument(
+        "--period",
+        default=None,
+        help="campaign period label, e.g. 2024-Q3 (default: current YYYY-MM)",
+    )
+    p_utm.set_defaults(func=_cmd_utm_plan)
 
     return parser
 

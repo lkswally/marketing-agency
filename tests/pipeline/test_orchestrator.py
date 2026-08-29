@@ -207,6 +207,27 @@ def _make_risky_intake(tmp_path: Path) -> Path:
     return new_path
 
 
+def test_default_blocked_skips_creative_and_visual(
+    mem: JsonFileMemory, tmp_path: Path
+) -> None:
+    """No explicit flag + blocks_publish=True → creative/visual are SKIPPED, exit 0."""
+    intake_path = _make_risky_intake(tmp_path)
+    orch = PipelineOrchestrator(memory=mem, outputs_root=tmp_path / "out")
+    summary = orch.run_from_file(intake_path)  # no flags
+    assert summary.blocks_publish is True
+    creative = summary.get_stage(StageId.CREATIVE)
+    visual = summary.get_stage(StageId.VISUAL)
+    assert creative is not None and creative.outcome is StageOutcome.SKIPPED
+    assert visual is not None and visual.outcome is StageOutcome.SKIPPED
+    # Audit trail must contain an approval.blocked event.
+    events = mem.read_audit_events(summary.client_slug)
+    actions = [
+        e.payload.get("campaign_pipeline", {}).get("action")
+        for e in events
+    ]
+    assert "approval.blocked" in actions
+
+
 def test_stop_on_blocked_halts_after_approval(
     mem: JsonFileMemory, tmp_path: Path
 ) -> None:

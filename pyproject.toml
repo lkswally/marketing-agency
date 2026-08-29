@@ -64,7 +64,15 @@ ignore = ["E501"]  # line length handled by formatter
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# --basetemp keeps all tmp dirs under .pytest_tmp/ (gitignored) so pytest
+# never touches the system temp dir (WinError 5 on some Windows setups).
+# tmp_path_retention_policy = "all" means no automatic per-test cleanup
+# during the run — conftest.py handles teardown with retry on WinError 32.
+addopts = "-ra --strict-markers --basetemp=.pytest_tmp"
+tmp_path_retention_policy = "all"
+# Keep pytest cache inside .pytest_tmp/ so scripts/test.ps1 can clean it
+# along with temp dirs; avoids WinError 183 from stale .pytest_cache/ state.
+cache_dir = ".pytest_tmp/.cache"
 markers = [
     "contract: contract tests for envelope/gates/audit (must pass before each block)",
     "integration: tests that hit external systems (skipped by default)",

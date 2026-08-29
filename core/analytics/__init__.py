@@ -41,10 +41,17 @@ from .models import (
     Recommendation,
     SEOOpportunity,
     SEOOpportunityReport,
+    snapshot_entity_id,
+    snapshot_id_from_period,
 )
 from .renderer import (
     render_markdown_import_report,
     render_markdown_recommendations,
+)
+from .snapshot_repo import (
+    latest_metric_snapshot,
+    list_metric_snapshots,
+    load_metric_snapshot,
 )
 
 __all__ = [
@@ -71,6 +78,11 @@ __all__ = [
     "SINGLETON_ID",
     "analyze_and_persist",
     "import_and_persist",
+    "latest_metric_snapshot",
+    "list_metric_snapshots",
+    "load_metric_snapshot",
     "render_markdown_import_report",
     "render_markdown_recommendations",
+    "snapshot_entity_id",
+    "snapshot_id_from_period",
 ]
