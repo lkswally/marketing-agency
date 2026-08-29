@@ -65,6 +65,15 @@ class OperationContext(BaseModel):
     correlation_id: str = Field(default_factory=new_id)
     requested_at: datetime = Field(default_factory=utcnow)
 
+    job_id: str | None = None
+    """Set by :class:`~core.jobs.runner.InlineJobRunner` (MKT-11D) when a
+    handler is invoked as part of job execution — ``None`` for every
+    direct (non-job) service call, which is every call before MKT-11D and
+    every call to a non-job service after it. A handler that wants to
+    correlate its own work (e.g. pipeline audit events) with the owning
+    job reads this field; nothing else in ``core.application`` branches
+    on it."""
+
     @field_validator("client_slug")
     @classmethod
     def _slug(cls, v: str) -> str:

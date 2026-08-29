@@ -18,13 +18,25 @@ from core.jobs import (
     JobState,
     JobTransitionError,
     UnknownOperationError,
+    default_registry,
 )
+from core.jobs.operations.campaign import register_campaign_operations
 from core.jobs.repository import JobRepository
 from core.memory import EntityNotFound, JsonFileMemory
 
 from ..context import OperationContext
 from ..policies import check_can_execute_job
 from ..result import ErrorCode, OperationError, OperationResult, OperationStatus, OperationWarning
+
+# MKT-11D — registered here, not in core/jobs/__init__.py, to avoid a
+# circular import: campaign.run's handler depends on
+# core.application.services.campaign_run, and this very module
+# (core.application.services.jobs) is what core.application.services
+# eagerly imported before the MKT-11D fix that removed that eager
+# aggregation (see core/application/services/__init__.py). Importing
+# core.jobs.operations.campaign here is safe regardless of import order —
+# see the longer explanation in core/jobs/__init__.py.
+register_campaign_operations(default_registry)
 
 
 def _runner_for(ctx: OperationContext, registry: JobRegistry | None) -> InlineJobRunner:

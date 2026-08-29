@@ -125,9 +125,23 @@ class JobOutcome(BaseModel):
         )
 
     @classmethod
-    def waiting_approval(cls, *, reason: str) -> JobOutcome:
+    def waiting_approval(
+        cls,
+        *,
+        reason: str,
+        data: dict[str, Any] | None = None,
+        result_ref: str | None = None,
+    ) -> JobOutcome:
+        """``data``/``result_ref`` are optional (MKT-11D) — a job that
+        pauses for approval may already have produced real artifacts
+        (e.g. a campaign's intake/strategy/approval-pack outputs). They
+        are carried as references, never duplicated, so the job record
+        does not lose that work while paused."""
         return cls(
-            status=JobOutcomeStatus.WAITING_APPROVAL, approval_reason=reason,
+            status=JobOutcomeStatus.WAITING_APPROVAL,
+            approval_reason=reason,
+            data=data,
+            result_ref=result_ref,
         )
 
 

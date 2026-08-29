@@ -70,6 +70,38 @@ class OperationSpec:
     listing must visibly flag them, so a dev_only operation is never
     mistaken for a real one."""
 
+    cancel_support: bool = True
+    """Whether this operation's execution can, in principle, be safely
+    interrupted mid-run. Purely advisory metadata in MKT-11C/11D —
+    :class:`~core.jobs.runner.InlineJobRunner` never honours it (a
+    RUNNING job cannot be cancelled regardless of this flag; see the
+    runner's own docstring). Exists so a future non-inline runner has
+    somewhere to read the operation's real cancellation contract from,
+    instead of every operation improvising its own convention. Set
+    ``False`` for operations (like ``campaign.run``) where a partial
+    mid-pipeline stop would leave inconsistent state."""
+
+    long_running: bool = False
+    """Advisory hint that this operation is expected to take more than a
+    trivial amount of wall-clock time (MKT-11D, e.g. a full campaign
+    pipeline run). Not enforced or timed by MKT-11C/11D — a future
+    scheduler/worker can use it to route work without every operation
+    re-declaring its own timeout convention."""
+
+    produces_artifacts: bool = False
+    """Advisory hint that a successful (or WAITING_APPROVAL) run of this
+    operation writes real files/entities beyond the ``JobRecord`` itself
+    — see ``JobOutcome.data`` / ``result_ref`` for how they are
+    referenced. Never duplicated into job storage."""
+
+    may_wait_for_approval: bool = False
+    """Advisory hint that this operation's handler can legitimately
+    return ``JobOutcome.waiting_approval(...)`` — as opposed to an
+    operation for which reaching ``WAITING_APPROVAL`` would indicate a
+    handler bug. Not enforced by the runner; a future policy/validation
+    layer can use it to catch a handler that emits the wrong outcome
+    kind for its declared operation."""
+
 
 class UnknownOperationError(LookupError):
     """Raised by :meth:`JobRegistry.resolve` for an unregistered operation.

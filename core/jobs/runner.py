@@ -156,6 +156,7 @@ class InlineJobRunner:
             root=self._root,
             actor_id=record.actor_id,
             correlation_id=record.correlation_id,
+            job_id=record.job_id,
         )
 
     def _apply_outcome(self, record: JobRecord, outcome: JobOutcome) -> JobRecord:
@@ -170,6 +171,11 @@ class InlineJobRunner:
         if outcome.status is JobOutcomeStatus.WAITING_APPROVAL:
             self._transition(record, JobState.WAITING_APPROVAL, action="waiting_approval")
             record.approval_reason = outcome.approval_reason
+            # MKT-11D: a job pausing for approval may already have
+            # produced real artifacts (e.g. campaign outputs up to the
+            # approval stage) — carry them, never drop them.
+            record.result_data = outcome.data
+            record.result_ref = outcome.result_ref
             self._repo.save(record)
             return record
 

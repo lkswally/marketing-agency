@@ -109,7 +109,14 @@ class PipelineStrictFailure(RuntimeError):  # noqa: N818
 class PipelineOrchestrator:
     """Chains every layer into one campaign run."""
 
-    def __init__(self, memory: Memory, *, outputs_root: Path) -> None:
+    def __init__(
+        self,
+        memory: Memory,
+        *,
+        outputs_root: Path,
+        job_id: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
         self._memory = memory
         self._outputs_root = outputs_root
         # Set per-run by run() / run_from_file(). Reset every invocation
@@ -117,6 +124,13 @@ class PipelineOrchestrator:
         self._strategy_backend: StrategyBackend | None = None
         self._backend_requested: BackendKind = BackendKind.TEMPLATED
         self._backend_fallback_events: list = []
+        # MKT-11D — optional correlation metadata. Additive only: absent
+        # (None) by default, so every pre-existing caller (the legacy
+        # `mkt run-campaign` CLI path) emits byte-identical audit payloads
+        # to before. Populated only when this orchestrator instance is
+        # driven by the job system (core/jobs/operations/campaign.py).
+        self._job_id = job_id
+        self._correlation_id = correlation_id
 
     # ---------- public API ----------
 
@@ -791,13 +805,21 @@ class PipelineOrchestrator:
         return summary
 
     def _emit_event(self, *, client_slug: str, payload: dict[str, Any]) -> None:
+        # MKT-11D — attach job/correlation metadata only when present, so
+        # a legacy (non-job) run's payload shape is byte-identical to
+        # before this field existed.
+        enriched = dict(payload)
+        if self._job_id is not None:
+            enriched["job_id"] = self._job_id
+        if self._correlation_id is not None:
+            enriched["correlation_id"] = self._correlation_id
         prev = self._memory.last_audit_hash(client_slug)
         event = AuditTrailEvent.build(
             event_type=AuditEventType.NOTE,
             actor="pipeline_orchestrator",
             occurred_at=utcnow(),
             client_slug=client_slug,
-            payload={"campaign_pipeline": payload},
+            payload={"campaign_pipeline": enriched},
             prev_hash=prev,
         )
         self._memory.append_audit_event(event)

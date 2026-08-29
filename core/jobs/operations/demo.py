@@ -73,6 +73,7 @@ def register_demo_operations(registry: JobRegistry) -> None:
         risk_class=JobRiskClass.LOW,
         description="Always pauses for approval — proves the WAITING_APPROVAL path.",
         dev_only=True,
+        may_wait_for_approval=True,
     ))
 
 

@@ -1837,3 +1837,97 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
   MKT-12A per the master plan); no automatic publishing; no new external
   write surface. `MKT-11D — migrate run-campaign onto jobs` is the
   proposed next milestone, presented separately after this block closes.
+
+---
+
+## From MKT-11D (campaign job migration)  ✅ RESOLVED (scoped)
+
+- **Introduced:** MKT-11D
+- **Resolved at:** MKT-11D (same block) — new `campaign.run` job operation
+  (`core/jobs/operations/campaign.py`) wrapping a new shared service
+  (`core/application/services/campaign_run.py::run_campaign`). The
+  service is intake-driven (no invented `--client` param — `client_slug`
+  comes from the intake file, exactly like the legacy CLI) and returns a
+  `CampaignRunOutcome` with exactly three kinds: `COMPLETED`
+  (`blocks_publish=False`), `BLOCKED` (`blocks_publish=True`, reached
+  regardless of which of `--require-approval`/`--stop-on-blocked`/neither
+  produced it — verified against the orchestrator's actual control flow,
+  documented in `docs/MKT-11D-Campaign-Job-Migration-Inventory.md` §3b),
+  and `STRICT_FAILURE` (invalid input — missing/malformed intake or
+  `PipelineStrictFailure`, itself verified to have exactly one raise
+  site, gated only on intake-validation, before mapping it to
+  `ErrorCode.INVALID_INPUT`). The job handler maps these to `COMPLETED` /
+  `WAITING_APPROVAL` / `FAILED` respectively — `WAITING_APPROVAL` carries
+  the already-produced artifacts (approval_pack_id, summary data) via the
+  now-additively-extended `JobOutcome.waiting_approval(data=..., result_ref=...)`
+  (previously reason-only; the runner also now actually persists that
+  data on the WAITING_APPROVAL path, which it silently dropped before).
+  `OperationSpec` gained four new advisory metadata fields
+  (`cancel_support`, `long_running`, `produces_artifacts`,
+  `may_wait_for_approval`) — `campaign.run` sets `cancel_support=False`
+  (a partial mid-pipeline stop would leave inconsistent state, same
+  synchronous-runner limitation as MKT-11C). Audit correlation
+  (Adjustment 3): `PipelineOrchestrator` gained optional `job_id` /
+  `correlation_id` constructor args, threaded through `OperationContext`
+  (which itself gained an optional `job_id` field, populated by
+  `InlineJobRunner._context_for`) — `campaign_pipeline.*` audit events
+  carry `job_id`/`correlation_id` only when the run came from a job;
+  legacy (non-job) runs emit byte-identical payloads to before, verified
+  by a dedicated test. **Real circular import found and fixed while
+  wiring this up**: `core/application/services/__init__.py` used to
+  eagerly aggregate all four services (`from . import analytics,
+  approvals, jobs, seo`), which made `campaign.run`'s dependency on
+  `core.application.services.campaign_run` circular through
+  `core.application.services.jobs` → `core.jobs` → `operations.campaign`
+  → back to `core.application.services`. Fixed at the root: removed the
+  eager aggregation (Python resolves `from core.application.services
+  import approvals`-style imports correctly without it); `campaign.run`'s
+  registration itself moved from `core/jobs/__init__.py` (where it would
+  still have been circular) to the bottom of
+  `core/application/services/jobs.py`, which by construction only
+  finishes after `core.jobs` is fully initialized. Verified against every
+  entry-point ordering (`import core.jobs` first, `import
+  core.jobs.operations.campaign` first, `from core.application.services
+  import jobs` first, `import cli.main`), not just the one that happened
+  to work first.
+- **Legacy `mkt run-campaign` behaviour preserved exactly**: its own
+  file-exists preflight (exit 2), its own `PipelineStrictFailure`/
+  `PipelineBlockedByApproval` handling (exit 4/3), and its own graceful
+  degradation on a malformed-but-existing intake (exit 0) all stayed
+  inline in `_cmd_run_campaign`, unchanged in control flow — only the
+  backend-selection block was extracted into the shared
+  `resolve_strategy_backend()` (moved verbatim, not reimplemented) so it
+  isn't duplicated between the legacy command and the job operation. This
+  was a deliberate choice, not an oversight: the shared `run_campaign()`
+  service also performs MKT-11D's execution-time intake re-validation
+  (Adjustment 2 — a job must never trust submit-time file state), which
+  treats a malformed intake as a hard failure; routing the legacy CLI
+  through that same function would have silently changed its 15-year
+  documented graceful-degradation behaviour for that one case. All 7
+  pre-existing `tests/cli/test_cli_run_campaign.py` tests pass unmodified.
+- **Notes:** ~40 new tests across
+  `tests/application/test_campaign_run_service.py`,
+  `tests/jobs/test_campaign_operation.py`, and
+  `tests/cli/test_cli_jobs_campaign.py` — covering all three outcome
+  kinds, the three-flags-one-outcome mapping, execution-time
+  re-validation, secret non-persistence (params, JobRecord, stdout,
+  stderr all scanned), audit correlation both present (job-driven) and
+  absent (legacy), double-execution idempotency, multi-tenant isolation,
+  and the exact legacy exit codes 0/2/3/4 untouched. Full suite green in
+  isolation, ruff clean, secret scan clean, `portal/` and ATLAS
+  untouched, `run-campaign`'s own control flow untouched.
+- **Deliberately NOT done in this block** (all explicitly out of scope
+  per the approved design): approval history / versioned approvals (the
+  job only carries a singleton `approval_pack_id` reference — a second
+  `campaign.run` invocation can invalidate its resolvability, documented
+  as known debt for MKT-12A, not solved here); productive resume
+  (`WAITING_APPROVAL → QUEUED` stays a valid, tested domain transition
+  with no command/service exposing it — resuming safely needs the
+  approval redesign first); cancellation during RUNNING
+  (`cancel_support=False`, same InlineJobRunner limitation as MKT-11C);
+  FastAPI; frontend; Supabase; threads/Redis/Celery/Temporal/external
+  workers; a scheduler; crawling / Website Intelligence; new LLM agents;
+  Telegram; new automatic publishing; Learning Engine; Decision Engine.
+  `campaign_run_summary` and `approval_pack` remain singleton `"current"`
+  per client (pre-existing limitation, unchanged, documented in the
+  inventory's §4).

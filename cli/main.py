@@ -1610,6 +1610,7 @@ def _cmd_jobs_submit(args: argparse.Namespace, *, out) -> int:
 
     ctx_kwargs: dict = dict(
         client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+        outputs_root=Path(getattr(args, "outputs_dir", None) or "outputs"),
     )
     correlation_id = getattr(args, "correlation_id", None)
     if correlation_id:
@@ -1647,6 +1648,7 @@ def _cmd_jobs_run(args: argparse.Namespace, *, out) -> int:
 
     ctx = OperationContext(
         client_slug=args.client, root=Path(args.root), actor_id=args.actor,
+        outputs_root=Path(getattr(args, "outputs_dir", None) or "outputs"),
     )
     result = jobs.run_job(ctx, job_id=args.job_id)
     return _handle_run_result(result, out=out)
@@ -2243,21 +2245,29 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
     - 2 — intake file missing.
     - 3 — ``--require-approval`` set AND the Approval Pack blocks publish.
     - 4 — ``--strict`` set AND the intake has critical issues.
-    """
-    import os
 
+    MKT-11D: backend selection is now
+    :func:`core.application.services.campaign_run.resolve_strategy_backend`
+    — moved, not reimplemented, so this command and the ``campaign.run``
+    job operation share exactly one copy of that logic. Everything else
+    (the file-exists preflight, the orchestrator call, the exception
+    handling for ``PipelineStrictFailure`` / ``PipelineBlockedByApproval``)
+    deliberately stays inline here rather than routing through the shared
+    ``run_campaign()`` service function: that function also performs
+    MKT-11D's execution-time intake re-validation (Adjustment 2), which
+    treats a malformed-but-existing intake file as a hard failure —
+    correct for a job that must never trust submit-time state, but a
+    behaviour change from this command's long-standing graceful
+    degradation (a malformed intake becomes a FAILED *stage* with exit 0,
+    not a command failure). Preserving that exact legacy distinction is
+    why this command keeps its own control flow.
+    """
+    from core.application.services.campaign_run import resolve_strategy_backend
     from core.memory import JsonFileMemory
     from core.pipeline import (
         PipelineBlockedByApproval,
         PipelineOrchestrator,
         PipelineStrictFailure,
-    )
-    from core.strategy import (
-        AnthropicSDKInvoker,
-        ClaudeStrategyBackend,
-        NoCredentialsError,
-        RefusingClaudeInvoker,
-        StrategyBackend,
     )
 
     intake_path = Path(args.intake)
@@ -2265,48 +2275,13 @@ def _cmd_run_campaign(args: argparse.Namespace, *, out) -> int:
         print(f"error: intake file not found: {intake_path}", file=out)
         return 2
 
-    # Backend selection. ``templated`` (default) = no injection — orchestrator
-    # uses the deterministic path. ``claude`` = wire ClaudeStrategyBackend.
-    # The invoker depends on whether ANTHROPIC_API_KEY is present AND whether
-    # the optional `anthropic` SDK is installed:
-    #   - key + SDK present → AnthropicSDKInvoker (real Claude calls, MKT-4B).
-    #   - key missing OR SDK missing → RefusingClaudeInvoker (MKT-4A behavior:
-    #     every call falls back to templated, surfaced in audit + summary +
-    #     stderr; pipeline still exits 0).
-    backend_choice = getattr(args, "backend", "templated")
-    strategy_backend: StrategyBackend | None = None
-    if backend_choice == "claude":
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        claude_model = getattr(args, "claude_model", None) or os.environ.get(
-            "ANTHROPIC_MODEL"
-        )
-        if not api_key:
-            # Warnings always to sys.stderr so JSON parsers reading stdout
-            # never see them (tests and downstream consumers).
-            print(
-                "WARNING: --backend claude requested but ANTHROPIC_API_KEY is "
-                "not set. Wiring RefusingClaudeInvoker — every creative method "
-                "will fall back to the templated backend. Set the env var to "
-                "enable real Claude calls.",
-                file=sys.stderr,
-            )
-            strategy_backend = ClaudeStrategyBackend(invoker=RefusingClaudeInvoker())
-        else:
-            try:
-                invoker = AnthropicSDKInvoker(
-                    api_key=api_key, model=claude_model
-                )
-                strategy_backend = ClaudeStrategyBackend(invoker=invoker)
-            except NoCredentialsError as e:
-                # The `anthropic` SDK is not installed. Reason text is safe.
-                print(
-                    f"WARNING: --backend claude requested but the SDK is not "
-                    f"available: {e}. Falling back to templated.",
-                    file=sys.stderr,
-                )
-                strategy_backend = ClaudeStrategyBackend(
-                    invoker=RefusingClaudeInvoker()
-                )
+    strategy_backend, backend_warning = resolve_strategy_backend(
+        getattr(args, "backend", "templated"), getattr(args, "claude_model", None),
+    )
+    if backend_warning:
+        # Always sys.stderr so JSON parsers reading stdout never see it
+        # (tests and downstream consumers) — same contract as before.
+        print(f"WARNING: {backend_warning}", file=sys.stderr)
 
     memory = JsonFileMemory(Path(args.root))
     orchestrator = PipelineOrchestrator(
@@ -3039,9 +3014,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_jobs_submit = jobs_subs.add_parser(
         "submit",
         help=(
-            "submit a new QUEUED job. Registered operations in this "
-            "milestone are dev/test-only (demo.echo, demo.fail, "
-            "demo.needs_approval) — no production capability ships yet."
+            "submit a new QUEUED job. demo.echo / demo.fail / "
+            "demo.needs_approval are dev/test-only. campaign.run (MKT-11D) "
+            "is the first production operation — runs the full campaign "
+            "pipeline, equivalent to `mkt run-campaign`."
         ),
     )
     p_jobs_submit.add_argument("--client", required=True, help="client slug")
@@ -3055,6 +3031,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--root",
         default=str(DEFAULT_DATA_ROOT),
         help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_submit.add_argument(
+        "--outputs-dir",
+        dest="outputs_dir",
+        default="outputs",
+        help="root directory where per-client outputs are written (default: outputs/) — relevant for operations that produce artifacts (e.g. campaign.run)",
     )
     p_jobs_submit.add_argument(
         "--actor", default="unknown", help="actor identity recorded on the job",
@@ -3081,6 +3063,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--root",
         default=str(DEFAULT_DATA_ROOT),
         help=f"memory root (default: {DEFAULT_DATA_ROOT})",
+    )
+    p_jobs_run.add_argument(
+        "--outputs-dir",
+        dest="outputs_dir",
+        default="outputs",
+        help="root directory where per-client outputs are written (default: outputs/) — relevant for operations that produce artifacts (e.g. campaign.run)",
     )
     p_jobs_run.add_argument(
         "--actor", default="unknown", help="actor identity recorded on the run",
