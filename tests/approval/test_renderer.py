@@ -134,8 +134,11 @@ def test_decision_section_after_approve(mem: JsonFileMemory) -> None:
     pipeline = StrategyPipeline(memory=mem)
     report = pipeline.run_from_path(DEMO_BRIEF).report
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(report))
-    approved = builder.approve(report.client_slug, reviewer="lucas", notes="vamos")
+    pack = builder.build_from_report(report)
+    builder.persist(pack)
+    approved = builder.approve(
+        report.client_slug, pack.pack_id, reviewer="lucas", notes="vamos",
+    )
     md = render_markdown_pack(approved)
     assert "Reviewer**: `lucas`" in md
     assert "vamos" in md

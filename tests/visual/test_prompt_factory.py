@@ -150,7 +150,9 @@ def test_state_with_approved_pack_is_ready(
     mem: JsonFileMemory, demo_report, clean_pack
 ) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    approved = builder.approve(demo_report.client_slug, reviewer="lucas")
+    approved = builder.approve(
+        demo_report.client_slug, clean_pack.pack_id, reviewer="lucas",
+    )
     pack = VisualPromptFactory(memory=mem).build(demo_report, approved, None)
     assert pack.derived_overall_state is CreativeAssetState.READY_FOR_PUBLISH
     assert pack.blocks_publish is False
@@ -172,7 +174,9 @@ def test_no_direction_is_ever_published(
     mem: JsonFileMemory, demo_report, clean_pack
 ) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    approved = builder.approve(demo_report.client_slug, reviewer="x")
+    approved = builder.approve(
+        demo_report.client_slug, clean_pack.pack_id, reviewer="x",
+    )
     pack = VisualPromptFactory(memory=mem).build(demo_report, approved, None)
     values = {s.value for s in CreativeAssetState}
     assert "published" not in values

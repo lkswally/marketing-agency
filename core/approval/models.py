@@ -158,6 +158,10 @@ class ApprovalPack(DomainModel):
 
     contract_version: Literal["approval-pack.v1"] = APPROVAL_PACK_VERSION
     pack_id: str = Field(default_factory=new_id)
+    """Canonical identity (MKT-11E). Also the persistence key
+    (``approval_pack/<pack_id>.json``) and what the application/CLI layer
+    calls ``approval_id`` — same value, no second identifier. Immutable
+    once set; never ``"current"``, never a list position or timestamp."""
     client_slug: Annotated[str, Field(min_length=2, max_length=64)]
     report_id: str = Field(min_length=1)
     report_contract_version: str = Field(min_length=1)
@@ -170,6 +174,16 @@ class ApprovalPack(DomainModel):
     updated_at: datetime
     decision: ApprovalDecision | None = None
     rule_set_id: str | None = None  # which rule pack produced these detections
+
+    # ---- MKT-11E: job/campaign association + queue-readiness fields ----
+    # All additive and optional — absent (None/[]) for every pack built by
+    # a pre-11E code path or a direct (non-job) CLI call, so nothing about
+    # the contract shape breaks for existing readers.
+    job_id: str | None = None
+    correlation_id: str | None = None
+    campaign_run_id: str | None = None
+    artifact_refs: list[str] = Field(default_factory=list)
+    requested_by: str | None = None
 
     @field_validator("client_slug")
     @classmethod

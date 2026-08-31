@@ -110,11 +110,13 @@ def test_factory_blocks_publish_reflects_upstream(tmp_path: Path) -> None:
     blocks_publish=True so ATLAS can refuse to ship."""
     slug = _prime(tmp_path)
     mem = JsonFileMemory(tmp_path / "mem")
-    from core.approval import APPROVAL_PACK_KIND
-    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
-    raw = mem.get(slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
+    # MKT-11E: the latest approval, resolved dynamically.
+    from core.approval import APPROVAL_PACK_KIND, get_latest_for_client
+    pack = get_latest_for_client(mem, slug)
+    assert pack is not None
+    raw = pack.model_dump(mode="json")
     raw["blocks_publish"] = True
-    mem.put(slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON, raw)
+    mem.put(slug, APPROVAL_PACK_KIND, pack.pack_id, raw)
     handoff = AtlasHandoffFactory(mem).build(
         client_slug=slug, kind=AtlasHandoffKind.LANDING,
     )

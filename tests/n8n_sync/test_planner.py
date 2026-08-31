@@ -42,8 +42,7 @@ def _run_full_chain(tmp_path: Path, *, risky: bool = False, with_notion: bool = 
     summary = orch.run_from_file(intake_path)
 
     # Build the execution task pack (orchestrator doesn't auto-run it).
-    from core.approval import APPROVAL_PACK_KIND, ApprovalPack
-    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
+    from core.approval import get_latest_for_client
     from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack, CreativeFactory
     from core.creative import SINGLETON_ID as CREATIVE_SINGLETON
     from core.memory import EntityNotFound
@@ -55,9 +54,9 @@ def _run_full_chain(tmp_path: Path, *, risky: bool = False, with_notion: bool = 
     report = CampaignStrategyReport.model_validate(
         mem.get(summary.client_slug, REPORT_KIND, STRATEGY_SINGLETON)
     )
-    approval = ApprovalPack.model_validate(
-        mem.get(summary.client_slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
-    )
+    # MKT-11E: the latest approval, resolved dynamically.
+    approval = get_latest_for_client(mem, summary.client_slug)
+    assert approval is not None
     # When approval blocks publish the orchestrator skips creative/visual by
     # default. Build the packs manually so downstream artifact consumers
     # (n8n planner, task factory) can access them in memory.

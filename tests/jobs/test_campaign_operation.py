@@ -103,7 +103,48 @@ def test_campaign_run_waiting_approval_carries_partial_data(tmp_path: Path) -> N
     assert result.result_data is not None
     assert result.result_data["blocks_publish"] is True
     assert result.result_data["approval_pack_id"]
-    assert result.result_ref == "acme-bootstrapped/approval_pack/current"
+    # MKT-11E: result_ref points at the real, versioned approval — never
+    # the "current" singleton (the bug this milestone fixes).
+    approval_id = result.result_data["approval_pack_id"]
+    assert result.result_ref == f"acme-bootstrapped/approval_pack/{approval_id}"
+
+
+def test_second_campaign_run_does_not_invalidate_first_approval(tmp_path: Path) -> None:
+    """MKT-11E acceptance criterion: a job's approval reference must keep
+    resolving to the SAME approval record even after a second campaign
+    run for the same client creates its own, separate approval."""
+    from core.approval import ApprovalPackBuilder
+
+    memory = JsonFileMemory(tmp_path / "mem")
+    reg = _registry()
+    runner = InlineJobRunner(memory, root=tmp_path / "mem", registry=reg)
+    risky = _risky_intake(tmp_path)
+    ctx = OperationContext(
+        client_slug="acme-bootstrapped", root=tmp_path / "mem", outputs_root=tmp_path / "out",
+    )
+
+    first = runner.submit(
+        ctx, operation="campaign.run",
+        params={"intake_path": str(risky), "require_approval": True},
+    )
+    first_result = runner.run(first.client_slug, first.job_id)
+    first_approval_id = first_result.result_data["approval_pack_id"]
+
+    second = runner.submit(
+        ctx, operation="campaign.run",
+        params={"intake_path": str(risky), "require_approval": True},
+    )
+    second_result = runner.run(second.client_slug, second.job_id)
+    second_approval_id = second_result.result_data["approval_pack_id"]
+
+    assert first_approval_id != second_approval_id
+
+    builder = ApprovalPackBuilder(memory=memory)
+    # The first job's approval reference still resolves to a real,
+    # untouched record — the second run never overwrote it.
+    still_there = builder.load("acme-bootstrapped", first_approval_id)
+    assert still_there.pack_id == first_approval_id
+    assert still_there.state.value == "draft"
 
 
 def test_campaign_run_failed_missing_intake(tmp_path: Path) -> None:

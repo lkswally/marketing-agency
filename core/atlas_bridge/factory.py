@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import contextlib
 
-from core.approval import APPROVAL_PACK_KIND, ApprovalPack
-from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
+from core.approval import repository as approval_repository
 from core.contracts import AuditEventType, AuditTrailEvent
 from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack
 from core.creative import SINGLETON_ID as CREATIVE_SINGLETON
@@ -71,9 +70,10 @@ class AtlasHandoffFactory:
         page_name: str | None = None,
     ) -> AtlasHandoffBrief:
         strategy = self._load_strategy(client_slug)
-        approval = self._optional_load(
-            client_slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON, ApprovalPack,
-        )
+        # MKT-11E compatibility shim: the most recent approval for this
+        # client, resolved dynamically — no more singleton read, no
+        # second write path. See core.approval.repository.
+        approval = approval_repository.get_latest_for_client(self._memory, client_slug)
         creative = self._optional_load(
             client_slug, CREATIVE_PACK_KIND, CREATIVE_SINGLETON, CreativeAssetPack,
         )

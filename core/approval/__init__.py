@@ -24,6 +24,11 @@ from .models import (
     ClaimRule,
 )
 from .renderer import render_markdown_pack
+from .repository import (
+    get_latest_for_client,
+    list_for_client,
+    list_pending_for_client,
+)
 
 __all__ = [
     "APPROVAL_PACK_VERSION",
@@ -47,4 +52,8 @@ __all__ = [
     "ClaimCategory",
     # Renderer
     "render_markdown_pack",
+    # Repository (MKT-11E)
+    "get_latest_for_client",
+    "list_for_client",
+    "list_pending_for_client",
 ]

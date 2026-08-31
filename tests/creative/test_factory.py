@@ -162,7 +162,9 @@ def test_state_with_approved_pack_is_ready_for_publish(
 ) -> None:
     """Approved + non-blocking → ready_for_publish."""
     builder = ApprovalPackBuilder(memory=mem)
-    approved = builder.approve(demo_report.client_slug, reviewer="lucas")
+    approved = builder.approve(
+        demo_report.client_slug, clean_approval_pack.pack_id, reviewer="lucas",
+    )
     pack = CreativeFactory(memory=mem).build(demo_report, approved)
     assert pack.derived_overall_state is CreativeAssetState.READY_FOR_PUBLISH
     assert pack.blocks_publish is False
@@ -205,7 +207,9 @@ def test_no_asset_is_ever_published(
 ) -> None:
     """Even after approval, the terminal positive state is READY_FOR_PUBLISH."""
     builder = ApprovalPackBuilder(memory=mem)
-    approved = builder.approve(demo_report.client_slug, reviewer="x")
+    approved = builder.approve(
+        demo_report.client_slug, clean_approval_pack.pack_id, reviewer="x",
+    )
     pack = CreativeFactory(memory=mem).build(demo_report, approved)
     # `published` is not part of the CreativeAssetState enum.
     values = {s.value for s in CreativeAssetState}

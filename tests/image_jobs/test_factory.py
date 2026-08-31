@@ -10,7 +10,6 @@ import pytest
 
 from cli.main import main
 from core.approval import APPROVAL_PACK_KIND
-from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
 from core.creative.models import CreativeAssetState
 from core.image_jobs import (
     IMAGE_GENERATION_JOB_PACK_KIND,
@@ -152,11 +151,16 @@ def test_provider_suggestion_matches_piece_type_heuristic(tmp_path: Path) -> Non
 
 
 def _force_approval_blocks(tmp_path: Path, slug: str) -> None:
-    """Mutate the persisted ApprovalPack so blocks_publish=True."""
+    """Mutate the latest persisted ApprovalPack so blocks_publish=True
+    (MKT-11E: resolved dynamically, not via the "current" singleton)."""
+    from core.approval import get_latest_for_client
+
     mem = JsonFileMemory(tmp_path / "mem")
-    raw = mem.get(slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
+    pack = get_latest_for_client(mem, slug)
+    assert pack is not None
+    raw = pack.model_dump(mode="json")
     raw["blocks_publish"] = True
-    mem.put(slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON, raw)
+    mem.put(slug, APPROVAL_PACK_KIND, pack.pack_id, raw)
 
 
 def test_factory_marks_all_jobs_blocked_when_approval_blocks(

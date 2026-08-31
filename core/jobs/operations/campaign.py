@@ -68,7 +68,7 @@ def _campaign_run_handler(
             ),
             data=outcome.summary_data,
             result_ref=(
-                f"{ctx.client_slug}/approval_pack/current"
+                f"{ctx.client_slug}/approval_pack/{approval_pack_id}"
                 if approval_pack_id else None
             ),
         )

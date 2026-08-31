@@ -28,8 +28,11 @@ def report(mem: JsonFileMemory):
 @pytest.fixture
 def clean_pack(mem: JsonFileMemory, report):
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(report))
-    return CreativeFactory(memory=mem).build(report, builder.load(report.client_slug))
+    pack = builder.build_from_report(report)
+    builder.persist(pack)
+    return CreativeFactory(memory=mem).build(
+        report, builder.load(report.client_slug, pack.pack_id),
+    )
 
 
 @pytest.fixture

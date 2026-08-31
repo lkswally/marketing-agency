@@ -10,7 +10,6 @@ import pytest
 
 from cli.main import main
 from core.approval import APPROVAL_PACK_KIND
-from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
 from core.image_jobs import (
     IMAGE_GENERATION_JOB_PACK_KIND,
     ImageJobFactory,
@@ -121,10 +120,15 @@ def test_planner_dry_run_status_is_only_dry_run_or_skipped(tmp_path: Path) -> No
 def test_planner_skipped_when_job_blocked_by_approval(tmp_path: Path) -> None:
     slug = _prime_pipeline_and_image_jobs(tmp_path)
     # Flip approval to blocks_publish=True and rebuild the job pack.
+    # MKT-11E: the latest approval, resolved dynamically.
+    from core.approval import get_latest_for_client
+
     mem = JsonFileMemory(tmp_path / "mem")
-    raw = mem.get(slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
+    pack = get_latest_for_client(mem, slug)
+    assert pack is not None
+    raw = pack.model_dump(mode="json")
     raw["blocks_publish"] = True
-    mem.put(slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON, raw)
+    mem.put(slug, APPROVAL_PACK_KIND, pack.pack_id, raw)
     new_job_pack = ImageJobFactory(mem).build(slug)
     mem.put(slug, IMAGE_GENERATION_JOB_PACK_KIND, JOB_PACK_SINGLETON,
             new_job_pack.model_dump(mode="json"))

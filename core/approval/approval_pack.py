@@ -30,10 +30,16 @@ from .models import (
     ClaimDetection,
 )
 
-# Memory kind for the persisted pack. Single pack per client at a time
-# (singleton id ``"current"``, same convention as MKT-3A).
+# Memory kind for the persisted pack.
 APPROVAL_PACK_KIND = "approval_pack"
 SINGLETON_ID = "current"
+"""Legacy entity id (pre-MKT-11E). No longer written by
+:meth:`ApprovalPackBuilder.persist` — packs are now persisted at
+``<pack_id>.json`` (versioned history, one file per approval). Kept as a
+constant only because a pre-existing ``current.json`` may still be present
+on a developer's disk (never migrated or deleted automatically — see
+``docs/MKT-11E-VERSIONED-APPROVAL-INVENTORY.md`` §7/§30) and because a few
+call sites still reference the name in comments/tests."""
 
 
 # Severity ranking used to compute ``overall_severity`` and ``blocks_publish``.
@@ -127,8 +133,23 @@ class ApprovalPackBuilder:
 
     # ---------- build ----------
 
-    def build_from_report(self, report: CampaignStrategyReport) -> ApprovalPack:
-        """Audit the report and assemble a :class:`ApprovalPack` (state=DRAFT)."""
+    def build_from_report(
+        self,
+        report: CampaignStrategyReport,
+        *,
+        job_id: str | None = None,
+        correlation_id: str | None = None,
+        campaign_run_id: str | None = None,
+        requested_by: str | None = None,
+    ) -> ApprovalPack:
+        """Audit the report and assemble a new :class:`ApprovalPack` (state=DRAFT).
+
+        Every call builds a **new** pack with a fresh ``pack_id`` (MKT-11E)
+        — this never mutates or overwrites a prior pack for the same
+        client. ``job_id``/``correlation_id``/``campaign_run_id`` are
+        optional association metadata, threaded through only when the
+        caller (the job system / pipeline) actually has them.
+        """
         detections = self._auditor.audit(report)
         overall = _max_severity(detections)
         now = utcnow()
@@ -145,49 +166,69 @@ class ApprovalPackBuilder:
             created_at=now,
             updated_at=now,
             rule_set_id=self._auditor.rule_set_id,
+            job_id=job_id,
+            correlation_id=correlation_id,
+            campaign_run_id=campaign_run_id,
+            requested_by=requested_by,
         )
         return pack
 
     # ---------- persistence ----------
 
     def persist(self, pack: ApprovalPack) -> None:
-        """Persist the pack to memory and emit the ``created`` audit event.
+        """Persist the pack to ``approval_pack/<pack_id>.json`` and emit the
+        ``created``/``updated`` audit event (MKT-11E: versioned, never the
+        ``"current"`` singleton — see :data:`SINGLETON_ID`'s docstring).
 
-        Idempotent re-persisting (same pack_id) just overwrites and emits
-        an ``approval_pack_updated`` note.
+        Idempotent re-persisting (same ``pack_id``) overwrites that one
+        record and emits an ``updated`` note; it never touches any other
+        client's or any other approval's record — no dual-write, no
+        cross-approval overwrite.
         """
         existed = self._memory.exists(
-            pack.client_slug, APPROVAL_PACK_KIND, SINGLETON_ID
+            pack.client_slug, APPROVAL_PACK_KIND, pack.pack_id
         )
         self._memory.put(
             pack.client_slug,
             APPROVAL_PACK_KIND,
-            SINGLETON_ID,
+            pack.pack_id,
             pack.model_dump(mode="json"),
         )
+        payload: dict[str, Any] = {
+            "approval_id": pack.pack_id,
+            "pack_id": pack.pack_id,
+            "report_id": pack.report_id,
+            "state": pack.state.value,
+            "overall_severity": pack.overall_severity.value,
+            "blocks_publish": pack.blocks_publish,
+            "total_detections": pack.total_detections,
+            "action": "updated" if existed else "created",
+        }
+        if pack.job_id is not None:
+            payload["job_id"] = pack.job_id
+        if pack.correlation_id is not None:
+            payload["correlation_id"] = pack.correlation_id
         self._emit_event(
             client_slug=pack.client_slug,
-            payload={
-                "pack_id": pack.pack_id,
-                "report_id": pack.report_id,
-                "state": pack.state.value,
-                "overall_severity": pack.overall_severity.value,
-                "blocks_publish": pack.blocks_publish,
-                "total_detections": pack.total_detections,
-                "action": "updated" if existed else "created",
-            },
+            payload=payload,
         )
 
-    def load(self, client_slug: str) -> ApprovalPack:
-        """Load the current pack for a client. Raises ``EntityNotFound`` if absent."""
-        raw = self._memory.get(client_slug, APPROVAL_PACK_KIND, SINGLETON_ID)
+    def load(self, client_slug: str, approval_id: str) -> ApprovalPack:
+        """Load one specific approval by its real identity.
+
+        Raises ``EntityNotFound`` if no record with that ``pack_id`` exists
+        for this client. There is no implicit "current" fallback here —
+        callers that want "the latest approval" must say so explicitly via
+        :func:`core.approval.repository.get_latest_for_client`.
+        """
+        raw = self._memory.get(client_slug, APPROVAL_PACK_KIND, approval_id)
         return ApprovalPack.model_validate(raw)
 
     # ---------- transitions ----------
 
-    def submit_for_review(self, client_slug: str) -> ApprovalPack:
+    def submit_for_review(self, client_slug: str, approval_id: str) -> ApprovalPack:
         """Move the pack from ``DRAFT`` to ``NEEDS_REVIEW``."""
-        pack = self.load(client_slug)
+        pack = self.load(client_slug, approval_id)
         if pack.state is not ApprovalState.DRAFT:
             raise ApprovalStateError(
                 f"can only submit a DRAFT pack (current state: {pack.state.value})"
@@ -202,12 +243,13 @@ class ApprovalPackBuilder:
     def approve(
         self,
         client_slug: str,
+        approval_id: str,
         *,
         reviewer: str,
         notes: str | None = None,
     ) -> ApprovalPack:
         """Move the pack to ``APPROVED``."""
-        pack = self.load(client_slug)
+        pack = self.load(client_slug, approval_id)
         if pack.state is ApprovalState.APPROVED:
             raise ApprovalStateError("pack is already APPROVED")
         if pack.state is ApprovalState.REJECTED:
@@ -225,12 +267,13 @@ class ApprovalPackBuilder:
     def reject(
         self,
         client_slug: str,
+        approval_id: str,
         *,
         reviewer: str,
         notes: str | None = None,
     ) -> ApprovalPack:
         """Move the pack to ``REJECTED``."""
-        pack = self.load(client_slug)
+        pack = self.load(client_slug, approval_id)
         if pack.state is ApprovalState.REJECTED:
             raise ApprovalStateError("pack is already REJECTED")
         if pack.state is ApprovalState.APPROVED:
@@ -266,20 +309,26 @@ class ApprovalPackBuilder:
         self._memory.put(
             updated.client_slug,
             APPROVAL_PACK_KIND,
-            SINGLETON_ID,
+            updated.pack_id,
             updated.model_dump(mode="json"),
         )
+        payload: dict[str, Any] = {
+            "approval_id": updated.pack_id,
+            "pack_id": updated.pack_id,
+            "report_id": updated.report_id,
+            "state": updated.state.value,
+            "overall_severity": updated.overall_severity.value,
+            "blocks_publish": updated.blocks_publish,
+            "action": action,
+            "reviewer": decision.reviewer if decision else None,
+        }
+        if updated.job_id is not None:
+            payload["job_id"] = updated.job_id
+        if updated.correlation_id is not None:
+            payload["correlation_id"] = updated.correlation_id
         self._emit_event(
             client_slug=updated.client_slug,
-            payload={
-                "pack_id": updated.pack_id,
-                "report_id": updated.report_id,
-                "state": updated.state.value,
-                "overall_severity": updated.overall_severity.value,
-                "blocks_publish": updated.blocks_publish,
-                "action": action,
-                "reviewer": decision.reviewer if decision else None,
-            },
+            payload=payload,
         )
         return updated
 

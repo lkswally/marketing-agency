@@ -15,7 +15,7 @@ from core.application import OperationContext, OperationRole
 from core.application.exit_codes import ExitCode, exit_code_for
 from core.application.result import ErrorCode
 from core.application.services import approvals
-from core.approval.approval_pack import APPROVAL_PACK_KIND, SINGLETON_ID
+from core.approval.approval_pack import APPROVAL_PACK_KIND
 from core.approval.models import ApprovalPack, ApprovalState
 from core.contracts import AuditEventType
 from core.memory import JsonFileMemory
@@ -33,7 +33,8 @@ def _seed_pack(
         updated_at=now,
         state=state,
     )
-    mem.put(client_slug, APPROVAL_PACK_KIND, SINGLETON_ID, pack.model_dump(mode="json"))
+    # MKT-11E: persisted under its own pack_id, not the "current" singleton.
+    mem.put(client_slug, APPROVAL_PACK_KIND, pack.pack_id, pack.model_dump(mode="json"))
     return pack
 
 
@@ -110,6 +111,37 @@ def test_show_approval_id_mismatch_is_not_found(tmp_path: Path) -> None:
     result = approvals.show(_ctx(tmp_path), approval_id="does-not-exist")
     assert not result.ok
     assert result.error.code is ErrorCode.NOT_FOUND
+
+
+# ---------- ambiguous implicit resolution (MKT-11E) ----------
+
+def test_show_without_approval_id_is_ambiguous_with_two_pending(tmp_path: Path) -> None:
+    mem = JsonFileMemory(tmp_path / "mem")
+    _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
+    _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
+    result = approvals.show(_ctx(tmp_path))
+    assert not result.ok
+    assert result.error.code is ErrorCode.INVALID_INPUT
+
+
+def test_approve_without_approval_id_is_ambiguous_with_two_pending(tmp_path: Path) -> None:
+    mem = JsonFileMemory(tmp_path / "mem")
+    _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
+    _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
+    result = approvals.approve(_ctx(tmp_path))
+    assert not result.ok
+    assert result.error.code is ErrorCode.INVALID_INPUT
+
+
+def test_approve_with_explicit_approval_id_resolves_correctly_among_many(
+    tmp_path: Path,
+) -> None:
+    mem = JsonFileMemory(tmp_path / "mem")
+    _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
+    target = _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
+    result = approvals.approve(_ctx(tmp_path), approval_id=target.pack_id)
+    assert result.ok
+    assert result.data.pack_id == target.pack_id
 
 
 def test_approve_approval_id_mismatch_blocks_transition(tmp_path: Path) -> None:
@@ -219,8 +251,8 @@ def test_audit_event_type_and_actor(tmp_path: Path) -> None:
 def test_show_corrupted_json_is_persistence_error(tmp_path: Path) -> None:
     mem_root = tmp_path / "mem"
     mem = JsonFileMemory(mem_root)
-    _seed_pack(mem, "acme")
-    pack_path = mem_root / "acme" / APPROVAL_PACK_KIND / f"{SINGLETON_ID}.json"
+    pack = _seed_pack(mem, "acme")
+    pack_path = mem_root / "acme" / APPROVAL_PACK_KIND / f"{pack.pack_id}.json"
     pack_path.write_text("{not valid json", encoding="utf-8")
     result = approvals.show(_ctx(tmp_path))
     assert not result.ok
@@ -230,8 +262,8 @@ def test_show_corrupted_json_is_persistence_error(tmp_path: Path) -> None:
 def test_show_schema_mismatch_is_persistence_error(tmp_path: Path) -> None:
     mem_root = tmp_path / "mem"
     mem = JsonFileMemory(mem_root)
-    _seed_pack(mem, "acme")
-    pack_path = mem_root / "acme" / APPROVAL_PACK_KIND / f"{SINGLETON_ID}.json"
+    pack = _seed_pack(mem, "acme")
+    pack_path = mem_root / "acme" / APPROVAL_PACK_KIND / f"{pack.pack_id}.json"
     pack_path.write_text('{"totally": "wrong shape"}', encoding="utf-8")
     result = approvals.show(_ctx(tmp_path))
     assert not result.ok
@@ -242,8 +274,10 @@ def test_list_pending_skips_corrupted_entries_without_crashing(tmp_path: Path) -
     mem_root = tmp_path / "mem"
     mem = JsonFileMemory(mem_root)
     _seed_pack(mem, "acme", state=ApprovalState.NEEDS_REVIEW)
-    _seed_pack(mem, "broken-client", state=ApprovalState.NEEDS_REVIEW)
-    broken_path = mem_root / "broken-client" / APPROVAL_PACK_KIND / f"{SINGLETON_ID}.json"
+    broken_pack = _seed_pack(mem, "broken-client", state=ApprovalState.NEEDS_REVIEW)
+    broken_path = (
+        mem_root / "broken-client" / APPROVAL_PACK_KIND / f"{broken_pack.pack_id}.json"
+    )
     broken_path.write_text("{not valid json", encoding="utf-8")
     result = approvals.list_pending(root=mem_root)
     assert result.ok

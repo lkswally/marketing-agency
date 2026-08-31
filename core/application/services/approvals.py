@@ -1,10 +1,12 @@
-"""Approval operations application service (MKT-11A + MKT-11B, D-11.5).
+"""Approval operations application service (MKT-11A/11B/11E).
 
 Wraps — never duplicates — the existing :class:`~core.approval.ApprovalPackBuilder`
-domain transitions (``approve`` / ``reject``). The policy gaps the domain
-deliberately leaves open are enforced here, at the application boundary,
-per ``docs/MKT-11A-Application-Services-Inventory.md`` §2 (F-4) and
-``docs/MKT-11B-Approval-Operations-Inventory.md``:
+domain transitions (``approve`` / ``reject``) and the
+:mod:`core.approval.repository` versioned queries. The policy gaps the
+domain deliberately leaves open are enforced here, at the application
+boundary, per ``docs/MKT-11A-Application-Services-Inventory.md`` §2 (F-4),
+``docs/MKT-11B-Approval-Operations-Inventory.md`` and
+``docs/MKT-11E-VERSIONED-APPROVAL-INVENTORY.md``:
 
 - **Idempotent success** (D-11B.1, confirmed) when the pack is already in
   the requested target state — returns ``ok`` with a warning, no new
@@ -13,21 +15,23 @@ per ``docs/MKT-11A-Application-Services-Inventory.md`` §2 (F-4) and
   :data:`ErrorCode.INVALID_STATE_TRANSITION`.
 - **Mandatory, non-empty reason** to reject — enforced before the domain
   is even called.
-- **``--approval-id`` as optional verification only** (D-11B.2, confirmed)
-  — there is no per-approval index in the domain (one pack per client,
-  entity id always ``"current"``). When supplied, it is compared against
-  the loaded pack's ``pack_id``; a mismatch is ``NOT_FOUND``, exactly as
-  if the approval did not exist. No new index, no history, no new
-  persistence.
+- **``approval_id`` real identity (MKT-11E)** — every client can have
+  multiple approvals now (one per pipeline/job run). Mutations resolve a
+  *specific* record:
+    - ``approval_id`` given → resolve exactly that record (``NOT_FOUND``
+      if it doesn't exist for this client — tenant-isolated).
+    - ``approval_id`` omitted → resolve via
+      :func:`core.approval.repository.list_pending_for_client`: exactly
+      one pending approval → use it (this is the common single-approval
+      case, kept ergonomic for the CLI); zero → ``NOT_FOUND``; more than
+      one → ``ErrorCode.INVALID_INPUT`` ("ambiguous"), never guessed.
+  No implicit "the current one" — the old singleton read is gone.
 - **Role authorization** (D-11.6) via :func:`core.application.policies.check_can_decide_approval`
   — checked before memory is touched.
 - **``audit_event_id`` is the real ``AuditTrailEvent.event_id``** (MKT-11B
   fix) — read back via ``read_audit_events`` after the domain transition,
   since :meth:`ApprovalPackBuilder._transition` does not return the event
-  it builds. Previously (MKT-11A) this field held the hash-chain tail,
-  which is a different value with a different meaning; no code outside
-  this module ever consumed that value contractually, so nothing else
-  changes.
+  it builds.
 - **Corrupted / schema-mismatched persistence** maps to
   :data:`ErrorCode.PERSISTENCE_ERROR`, distinct from
   :data:`ErrorCode.NOT_FOUND` — the record exists on disk but cannot be
@@ -46,16 +50,14 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from core.approval import ApprovalPack, ApprovalPackBuilder, ApprovalState, ApprovalStateError
+from core.approval import repository as approval_repository
 from core.memory import EntityNotFound, JsonFileMemory
 
 from ..context import OperationContext
 from ..policies import check_can_decide_approval
 from ..result import ErrorCode, OperationResult, OperationWarning
 
-_PENDING_STATES = frozenset({ApprovalState.NEEDS_REVIEW, ApprovalState.DRAFT})
 _RESERVED_SLUGS = frozenset({"_shared"})
-_APPROVAL_PACK_KIND = "approval_pack"
-_APPROVAL_PACK_SINGLETON = "current"
 
 
 def _discover_client_slugs(root: Path) -> list[str]:
@@ -81,46 +83,75 @@ class PendingApprovalSummary(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     client_slug: str
-    pack_id: str
+    approval_id: str
+    pack_id: str  # == approval_id, kept for pre-11E field-name compatibility
     state: ApprovalState
     overall_severity: str
     blocks_publish: bool
+    job_id: str | None = None
 
 
-def _load_pack_or_error(
-    memory: JsonFileMemory, client_slug: str,
+def _resolve_pack_or_error(
+    memory: JsonFileMemory, client_slug: str, approval_id: str | None,
 ) -> tuple[ApprovalPack | None, OperationResult | None]:
-    """Shared load path: NOT_FOUND vs PERSISTENCE_ERROR vs success."""
-    builder = ApprovalPackBuilder(memory=memory)
+    """Resolve exactly one approval for a mutation/show call (MKT-11E).
+
+    ``approval_id`` given → load that exact record (``NOT_FOUND`` if it
+    doesn't exist for this client — tenant-isolated by construction, since
+    the lookup itself is scoped to ``client_slug``).
+
+    ``approval_id`` omitted → resolve via *every* approval the client has
+    (not just the pending ones — an idempotent re-approve/re-reject on an
+    already-terminal sole approval must still resolve it, matching the
+    pre-11E single-pack-per-client ergonomics): exactly one → use it;
+    zero → ``NOT_FOUND``; more than one → ``INVALID_INPUT`` ("ambiguous"),
+    never guessed.
+    """
+    if approval_id is not None:
+        builder = ApprovalPackBuilder(memory=memory)
+        try:
+            pack = builder.load(client_slug, approval_id)
+        except EntityNotFound:
+            return None, OperationResult.error_result(
+                code=ErrorCode.NOT_FOUND,
+                message=(
+                    f"no ApprovalPack with id {approval_id!r} for client "
+                    f"{client_slug!r}"
+                ),
+            )
+        except (json.JSONDecodeError, ValidationError) as e:
+            return None, OperationResult.error_result(
+                code=ErrorCode.PERSISTENCE_ERROR,
+                message=(
+                    f"ApprovalPack {approval_id!r} for client "
+                    f"{client_slug!r} could not be read: {e}"
+                ),
+            )
+        return pack, None
+
     try:
-        pack = builder.load(client_slug)
-    except EntityNotFound:
-        return None, OperationResult.error_result(
-            code=ErrorCode.NOT_FOUND,
-            message=f"no ApprovalPack for client {client_slug!r}",
-            remediation="run `mkt audit-strategy` first",
-        )
+        candidates = approval_repository.list_for_client(memory, client_slug)
     except (json.JSONDecodeError, ValidationError) as e:
         return None, OperationResult.error_result(
             code=ErrorCode.PERSISTENCE_ERROR,
-            message=f"ApprovalPack for client {client_slug!r} could not be read: {e}",
+            message=f"approval history for client {client_slug!r} could not be read: {e}",
         )
-    return pack, None
-
-
-def _verify_approval_id(
-    pack: ApprovalPack, approval_id: str | None, client_slug: str,
-) -> OperationResult | None:
-    """D-11B.2: optional verification only — no index, no history."""
-    if approval_id is not None and approval_id != pack.pack_id:
-        return OperationResult.error_result(
+    if not candidates:
+        return None, OperationResult.error_result(
             code=ErrorCode.NOT_FOUND,
-            message=(
-                f"no ApprovalPack with id {approval_id!r} for client "
-                f"{client_slug!r} (current pack id is {pack.pack_id!r})"
-            ),
+            message=f"no ApprovalPack for client {client_slug!r}",
+            remediation="run `mkt audit-strategy` or `mkt run-campaign` first",
         )
-    return None
+    if len(candidates) > 1:
+        return None, OperationResult.error_result(
+            code=ErrorCode.INVALID_INPUT,
+            message=(
+                f"{len(candidates)} approvals exist for client {client_slug!r} — "
+                "ambiguous without --approval-id"
+            ),
+            remediation="pass --approval-id (see `mkt approvals list --client " + client_slug + "`)",
+        )
+    return candidates[0], None
 
 
 def _latest_audit_event_id(memory: JsonFileMemory, client_slug: str) -> str | None:
@@ -139,58 +170,63 @@ def list_pending(
     root: Path,
     client_slug: str | None = None,
     status: ApprovalState | None = None,
+    job_id: str | None = None,
     limit: int | None = None,
 ) -> OperationResult:
-    """List approval packs across every tenant that are NOT in a
-    terminal state, or whose posture blocks publish even if reviewed.
+    """List approvals across every tenant that are NOT in a terminal
+    state, or whose posture blocks publish even if reviewed (MKT-11E:
+    multiple approvals per client are now possible, so this can return
+    more than one row per tenant).
 
     Cross-tenant by design — see module docstring. ``client_slug``
     narrows to one tenant; ``status`` narrows to one :class:`ApprovalState`
     (bypassing the default pending/blocked filter — an explicit status
     filter means the caller wants exactly that state, terminal or not);
-    ``limit`` caps the number of rows returned (deterministic order:
-    sorted by ``client_slug``, ascending, same as the tenant scan).
+    ``job_id`` narrows to the approval associated with one job;
+    ``limit`` caps the number of rows returned. Deterministic order:
+    tenants in ``client_slug`` ascending order, each tenant's own
+    approvals newest-``created_at``-first.
     """
     memory = JsonFileMemory(root)
     slugs = [client_slug] if client_slug else _discover_client_slugs(root)
     rows: list[PendingApprovalSummary] = []
     for slug in slugs:
         try:
-            raw = memory.get(slug, _APPROVAL_PACK_KIND, _APPROVAL_PACK_SINGLETON)
-        except EntityNotFound:
-            continue
+            if status is not None:
+                packs = approval_repository.list_for_client(
+                    memory, slug, status=status, job_id=job_id,
+                )
+            else:
+                packs = approval_repository.list_pending_for_client(memory, slug)
+                if job_id is not None:
+                    packs = [p for p in packs if p.job_id == job_id]
         except (json.JSONDecodeError, ValidationError):
             continue  # corrupted entries are skipped in a queue listing,
             # not surfaced as a hard failure — `show`/`approve`/`reject`
-            # against that specific client will report PERSISTENCE_ERROR.
-        pack = ApprovalPack.model_validate(raw)
-        if status is not None:
-            if pack.state is not status:
-                continue
-        elif not (pack.state in _PENDING_STATES or pack.blocks_publish):
-            continue
-        rows.append(PendingApprovalSummary(
-            client_slug=slug,
-            pack_id=pack.pack_id,
-            state=pack.state,
-            overall_severity=pack.overall_severity.value,
-            blocks_publish=pack.blocks_publish,
-        ))
-        if limit is not None and len(rows) >= limit:
-            break
+            # against a specific approval_id still reports PERSISTENCE_ERROR.
+        for pack in packs:
+            rows.append(PendingApprovalSummary(
+                client_slug=slug,
+                approval_id=pack.pack_id,
+                pack_id=pack.pack_id,
+                state=pack.state,
+                overall_severity=pack.overall_severity.value,
+                blocks_publish=pack.blocks_publish,
+                job_id=pack.job_id,
+            ))
+            if limit is not None and len(rows) >= limit:
+                return OperationResult.ok_result(data=rows)
     return OperationResult.ok_result(data=rows)
 
 
 def show(ctx: OperationContext, *, approval_id: str | None = None) -> OperationResult:
-    """Load the current ApprovalPack for one tenant."""
+    """Load one approval for a tenant — a specific one, or (if omitted)
+    the tenant's sole pending approval when unambiguous (MKT-11E)."""
     memory = JsonFileMemory(ctx.root)
-    pack, error = _load_pack_or_error(memory, ctx.client_slug)
+    pack, error = _resolve_pack_or_error(memory, ctx.client_slug, approval_id)
     if error is not None:
         return error
     assert pack is not None
-    id_error = _verify_approval_id(pack, approval_id, ctx.client_slug)
-    if id_error is not None:
-        return id_error
     return OperationResult.ok_result(data=pack)
 
 
@@ -200,20 +236,17 @@ def approve(
     notes: str | None = None,
     approval_id: str | None = None,
 ) -> OperationResult:
-    """Approve the tenant's current pack. Idempotent: re-approving an
+    """Approve one specific approval. Idempotent: re-approving an
     already-APPROVED pack succeeds with a warning, no new audit event."""
     perm_error = check_can_decide_approval(ctx)
     if perm_error is not None:
         return perm_error
 
     memory = JsonFileMemory(ctx.root)
-    pack, error = _load_pack_or_error(memory, ctx.client_slug)
+    pack, error = _resolve_pack_or_error(memory, ctx.client_slug, approval_id)
     if error is not None:
         return error
     assert pack is not None
-    id_error = _verify_approval_id(pack, approval_id, ctx.client_slug)
-    if id_error is not None:
-        return id_error
 
     if pack.state is ApprovalState.APPROVED:
         return OperationResult.ok_result(
@@ -226,7 +259,9 @@ def approve(
 
     builder = ApprovalPackBuilder(memory=memory)
     try:
-        updated = builder.approve(ctx.client_slug, reviewer=ctx.actor_id, notes=notes)
+        updated = builder.approve(
+            ctx.client_slug, pack.pack_id, reviewer=ctx.actor_id, notes=notes,
+        )
     except ApprovalStateError as e:
         return OperationResult.error_result(
             code=ErrorCode.INVALID_STATE_TRANSITION,
@@ -242,8 +277,8 @@ def reject(
     reason: str,
     approval_id: str | None = None,
 ) -> OperationResult:
-    """Reject the tenant's current pack. ``reason`` is mandatory (D-11.5)
-    — enforced here, not in the domain, so other domain callers keep
+    """Reject one specific approval. ``reason`` is mandatory (D-11.5) —
+    enforced here, not in the domain, so other domain callers keep
     working with an optional ``notes``. Idempotent: re-rejecting an
     already-REJECTED pack succeeds with a warning, no new audit event."""
     if not reason or not reason.strip():
@@ -257,13 +292,10 @@ def reject(
         return perm_error
 
     memory = JsonFileMemory(ctx.root)
-    pack, error = _load_pack_or_error(memory, ctx.client_slug)
+    pack, error = _resolve_pack_or_error(memory, ctx.client_slug, approval_id)
     if error is not None:
         return error
     assert pack is not None
-    id_error = _verify_approval_id(pack, approval_id, ctx.client_slug)
-    if id_error is not None:
-        return id_error
 
     if pack.state is ApprovalState.REJECTED:
         return OperationResult.ok_result(
@@ -276,7 +308,9 @@ def reject(
 
     builder = ApprovalPackBuilder(memory=memory)
     try:
-        updated = builder.reject(ctx.client_slug, reviewer=ctx.actor_id, notes=reason)
+        updated = builder.reject(
+            ctx.client_slug, pack.pack_id, reviewer=ctx.actor_id, notes=reason,
+        )
     except ApprovalStateError as e:
         return OperationResult.error_result(
             code=ErrorCode.INVALID_STATE_TRANSITION,

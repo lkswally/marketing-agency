@@ -99,11 +99,13 @@ def test_pack_caveat_only_does_not_block(mem: JsonFileMemory, demo_report) -> No
 # ---------- persistence ----------
 
 def test_persist_writes_to_memory(mem: JsonFileMemory, demo_report) -> None:
+    # MKT-11E: persisted at <pack_id>.json, not the "current" singleton.
     builder = ApprovalPackBuilder(memory=mem)
     pack = builder.build_from_report(demo_report)
     builder.persist(pack)
-    assert mem.exists(demo_report.client_slug, APPROVAL_PACK_KIND, SINGLETON_ID)
-    raw = mem.get(demo_report.client_slug, APPROVAL_PACK_KIND, SINGLETON_ID)
+    assert mem.exists(demo_report.client_slug, APPROVAL_PACK_KIND, pack.pack_id)
+    assert not mem.exists(demo_report.client_slug, APPROVAL_PACK_KIND, SINGLETON_ID)
+    raw = mem.get(demo_report.client_slug, APPROVAL_PACK_KIND, pack.pack_id)
     assert raw["pack_id"] == pack.pack_id
 
 
@@ -122,7 +124,7 @@ def test_load_returns_persisted_pack(mem: JsonFileMemory, demo_report) -> None:
     builder = ApprovalPackBuilder(memory=mem)
     saved = builder.build_from_report(demo_report)
     builder.persist(saved)
-    loaded = builder.load(demo_report.client_slug)
+    loaded = builder.load(demo_report.client_slug, saved.pack_id)
     assert loaded.pack_id == saved.pack_id
 
 
@@ -134,24 +136,26 @@ def test_submit_for_review_succeeds_on_draft(
     builder = ApprovalPackBuilder(memory=mem)
     pack = builder.build_from_report(demo_report)
     builder.persist(pack)
-    submitted = builder.submit_for_review(demo_report.client_slug)
+    submitted = builder.submit_for_review(demo_report.client_slug, pack.pack_id)
     assert submitted.state is ApprovalState.NEEDS_REVIEW
     assert submitted.updated_at >= pack.created_at
 
 
 def test_cannot_submit_twice(mem: JsonFileMemory, demo_report) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(demo_report))
-    builder.submit_for_review(demo_report.client_slug)
+    pack = builder.build_from_report(demo_report)
+    builder.persist(pack)
+    builder.submit_for_review(demo_report.client_slug, pack.pack_id)
     with pytest.raises(ApprovalStateError):
-        builder.submit_for_review(demo_report.client_slug)
+        builder.submit_for_review(demo_report.client_slug, pack.pack_id)
 
 
 def test_approve_records_decision(mem: JsonFileMemory, demo_report) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(demo_report))
+    pack = builder.build_from_report(demo_report)
+    builder.persist(pack)
     approved = builder.approve(
-        demo_report.client_slug, reviewer="lucas", notes="OK"
+        demo_report.client_slug, pack.pack_id, reviewer="lucas", notes="OK"
     )
     assert approved.state is ApprovalState.APPROVED
     assert approved.decision is not None
@@ -163,9 +167,10 @@ def test_approve_records_decision(mem: JsonFileMemory, demo_report) -> None:
 
 def test_reject_records_decision(mem: JsonFileMemory, demo_report) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(demo_report))
+    pack = builder.build_from_report(demo_report)
+    builder.persist(pack)
     rejected = builder.reject(
-        demo_report.client_slug, reviewer="lucas", notes="no"
+        demo_report.client_slug, pack.pack_id, reviewer="lucas", notes="no"
     )
     assert rejected.state is ApprovalState.REJECTED
     assert rejected.decision is not None
@@ -175,27 +180,30 @@ def test_reject_records_decision(mem: JsonFileMemory, demo_report) -> None:
 
 def test_cannot_approve_after_reject(mem: JsonFileMemory, demo_report) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(demo_report))
-    builder.reject(demo_report.client_slug, reviewer="r")
+    pack = builder.build_from_report(demo_report)
+    builder.persist(pack)
+    builder.reject(demo_report.client_slug, pack.pack_id, reviewer="r")
     with pytest.raises(ApprovalStateError):
-        builder.approve(demo_report.client_slug, reviewer="r")
+        builder.approve(demo_report.client_slug, pack.pack_id, reviewer="r")
 
 
 def test_cannot_reject_after_approve(mem: JsonFileMemory, demo_report) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(demo_report))
-    builder.approve(demo_report.client_slug, reviewer="r")
+    pack = builder.build_from_report(demo_report)
+    builder.persist(pack)
+    builder.approve(demo_report.client_slug, pack.pack_id, reviewer="r")
     with pytest.raises(ApprovalStateError):
-        builder.reject(demo_report.client_slug, reviewer="r")
+        builder.reject(demo_report.client_slug, pack.pack_id, reviewer="r")
 
 
 def test_transitions_emit_audit_events(
     mem: JsonFileMemory, demo_report
 ) -> None:
     builder = ApprovalPackBuilder(memory=mem)
-    builder.persist(builder.build_from_report(demo_report))
-    builder.submit_for_review(demo_report.client_slug)
-    builder.approve(demo_report.client_slug, reviewer="lucas")
+    pack = builder.build_from_report(demo_report)
+    builder.persist(pack)
+    builder.submit_for_review(demo_report.client_slug, pack.pack_id)
+    builder.approve(demo_report.client_slug, pack.pack_id, reviewer="lucas")
     events = mem.read_audit_events(demo_report.client_slug)
     # 3 approval-pack events (created, submitted, approved) + the workflow events.
     pack_events = [
@@ -216,7 +224,7 @@ def test_audit_and_persist_returns_persisted(
 ) -> None:
     pack = audit_and_persist(mem, demo_report)
     assert pack.state is ApprovalState.DRAFT
-    assert mem.exists(demo_report.client_slug, APPROVAL_PACK_KIND, SINGLETON_ID)
+    assert mem.exists(demo_report.client_slug, APPROVAL_PACK_KIND, pack.pack_id)
 
 
 # ---------- count helpers ----------

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cli.main import main
-from core.approval.approval_pack import APPROVAL_PACK_KIND, SINGLETON_ID
+from core.approval.approval_pack import APPROVAL_PACK_KIND
 from core.approval.models import ApprovalPack, ApprovalState
 
 
@@ -43,7 +43,8 @@ def _seed_pack(
         report_contract_version="campaign-strategy-report.v1",
         created_at=now, updated_at=now, state=state,
     )
-    mem.put(client, APPROVAL_PACK_KIND, SINGLETON_ID, pack.model_dump(mode="json"))
+    # MKT-11E: persisted under its own pack_id, not the "current" singleton.
+    mem.put(client, APPROVAL_PACK_KIND, pack.pack_id, pack.model_dump(mode="json"))
     return pack.pack_id
 
 
@@ -154,8 +155,8 @@ def test_reject_empty_reason_exits_2(tmp_path: Path) -> None:
 
 def test_show_persistence_error_exits_6(tmp_path: Path) -> None:
     mem_root = tmp_path / "mem"
-    _seed_pack(mem_root, "acme")
-    pack_path = mem_root / "acme" / APPROVAL_PACK_KIND / f"{SINGLETON_ID}.json"
+    pack_id = _seed_pack(mem_root, "acme")
+    pack_path = mem_root / "acme" / APPROVAL_PACK_KIND / f"{pack_id}.json"
     pack_path.write_text("{not valid json", encoding="utf-8")
     code, stdout, _ = _run([
         "approvals", "show", "--client", "acme", "--root", str(mem_root),

@@ -266,11 +266,7 @@ def _cmd_build_creatives(args: argparse.Namespace, *, out) -> int:
     persists the resulting ``CreativeAssetPack`` to memory and writes
     Markdown + JSON to ``--outputs-dir``.
     """
-    from core.approval import (
-        APPROVAL_PACK_KIND,
-        ApprovalPack,
-    )
-    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON_ID
+    from core.approval import get_latest_for_client
     from core.creative import (
         CreativeFactory,
         render_markdown_pack,
@@ -290,13 +286,9 @@ def _cmd_build_creatives(args: argparse.Namespace, *, out) -> int:
         return 2
     report = CampaignStrategyReport.model_validate(report_raw)
 
-    approval_pack: ApprovalPack | None = None
-    try:
-        ap_raw = memory.get(args.client, APPROVAL_PACK_KIND, APPROVAL_SINGLETON_ID)
-        approval_pack = ApprovalPack.model_validate(ap_raw)
-    except EntityNotFound:
-        # No audit ran yet — the factory defaults to a conservative state.
-        approval_pack = None
+    # MKT-11E compatibility shim: the most recent approval for this
+    # client, resolved dynamically (no more singleton read).
+    approval_pack = get_latest_for_client(memory, args.client)
 
     if (
         getattr(args, "require_approval", False)
@@ -346,11 +338,7 @@ def _cmd_build_visuals(args: argparse.Namespace, *, out) -> int:
     :class:`VisualPromptFactory`, persists the resulting ``VisualDirectionPack``
     to memory and writes Markdown + JSON to ``--outputs-dir``.
     """
-    from core.approval import (
-        APPROVAL_PACK_KIND,
-        ApprovalPack,
-    )
-    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON_ID
+    from core.approval import get_latest_for_client
     from core.creative import (
         CREATIVE_PACK_KIND,
         CreativeAssetPack,
@@ -372,12 +360,8 @@ def _cmd_build_visuals(args: argparse.Namespace, *, out) -> int:
         return 2
     report = CampaignStrategyReport.model_validate(report_raw)
 
-    approval_pack: ApprovalPack | None = None
-    try:
-        ap_raw = memory.get(args.client, APPROVAL_PACK_KIND, APPROVAL_SINGLETON_ID)
-        approval_pack = ApprovalPack.model_validate(ap_raw)
-    except EntityNotFound:
-        approval_pack = None
+    # MKT-11E compatibility shim: most recent approval, resolved dynamically.
+    approval_pack = get_latest_for_client(memory, args.client)
 
     creative_pack: CreativeAssetPack | None = None
     try:
@@ -443,8 +427,7 @@ def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
     """
     import contextlib
 
-    from core.approval import APPROVAL_PACK_KIND, ApprovalPack
-    from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
+    from core.approval import get_latest_for_client
     from core.contracts import AuditEventType, AuditTrailEvent
     from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack
     from core.creative import SINGLETON_ID as CREATIVE_SINGLETON
@@ -472,11 +455,8 @@ def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
         return 2
     report = CampaignStrategyReport.model_validate(report_raw)
 
-    approval = None
-    with contextlib.suppress(EntityNotFound):
-        approval = ApprovalPack.model_validate(
-            memory.get(args.client, APPROVAL_PACK_KIND, APPROVAL_SINGLETON)
-        )
+    # MKT-11E compatibility shim: most recent approval, resolved dynamically.
+    approval = get_latest_for_client(memory, args.client)
 
     creative = None
     with contextlib.suppress(EntityNotFound):
@@ -1431,6 +1411,7 @@ def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
         root=Path(args.root),
         client_slug=getattr(args, "client", None) or None,
         status=parsed_status,
+        job_id=getattr(args, "job_id", None) or None,
         limit=getattr(args, "limit", None),
     )
     payload = {
@@ -1438,10 +1419,12 @@ def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
         "pending": [
             {
                 "client_slug": row.client_slug,
+                "approval_id": row.approval_id,
                 "pack_id": row.pack_id,
                 "state": row.state.value,
                 "overall_severity": row.overall_severity,
                 "blocks_publish": row.blocks_publish,
+                "job_id": row.job_id,
             }
             for row in result.data
         ],
@@ -1451,19 +1434,18 @@ def _cmd_approvals_list(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_approvals_show(args: argparse.Namespace, *, out) -> int:
-    """Show the current ApprovalPack for one client (MKT-11A + MKT-11B,
-    D-11.5).
+    """Show one approval for a client (MKT-11A/11B/11E).
 
-    ``--approval-id``, when given, is verified against the loaded pack's
-    ``pack_id`` (D-11B.2) — there is no per-approval index in the domain,
-    so this is a guard against acting on the wrong pack by typo, not a
-    lookup mechanism.
+    ``--approval-id`` selects a specific approval by its real, versioned
+    identity. When omitted, resolves the client's pending approvals: one
+    → shown; zero or more than one → a structured error (never guessed).
 
     Exit codes (see ``core.application.exit_codes.ExitCode``):
     - 0 on success.
-    - 3 when there is no ApprovalPack for the client, or ``--approval-id``
-      does not match the current pack.
-    - 6 when the persisted pack exists but cannot be read back (corrupted
+    - 2 when ``--approval-id`` is omitted and more than one approval is
+      pending for the client (ambiguous).
+    - 3 when the approval does not exist for the client.
+    - 6 when the persisted record exists but cannot be read back (corrupted
       JSON or a schema mismatch).
     """
     from core.application import OperationContext, exit_code_for
@@ -1482,20 +1464,23 @@ def _cmd_approvals_show(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_approve(args: argparse.Namespace, *, out) -> int:
-    """Approve the current ApprovalPack for one client (MKT-11A + MKT-11B,
-    D-11.5).
+    """Approve one specific approval for one client (MKT-11A/11B/11E).
 
     Wraps :meth:`core.approval.ApprovalPackBuilder.approve` — idempotent
     when the pack is already APPROVED (exit 0, warning surfaced).
-    ``--approval-id`` is optional verification only (D-11B.2). Requires a
-    role authorized to decide (``operator`` / ``approver`` / ``admin`` —
-    see ``core.application.policies``); the CLI's ``OperationContext``
-    uses its default role, so this only matters for callers that build
-    their own context (a future API/worker).
+    ``--approval-id`` selects the real, versioned approval to act on; when
+    omitted, resolves the client's pending approvals (one → used; zero or
+    more than one → structured error, never guessed). Requires a role
+    authorized to decide (``operator`` / ``approver`` / ``admin`` — see
+    ``core.application.policies``); the CLI's ``OperationContext`` uses
+    its default role, so this only matters for callers that build their
+    own context (a future API/worker).
 
     Exit codes (see ``core.application.exit_codes.ExitCode``):
     - 0 on success (including the idempotent no-op case).
-    - 3 when there is no ApprovalPack, or ``--approval-id`` mismatches.
+    - 2 when ``--approval-id`` is omitted and more than one approval is
+      pending for the client (ambiguous).
+    - 3 when the approval does not exist for the client.
     - 4 when the transition is invalid (e.g. the pack is already REJECTED).
     - 5 when the actor's role is not authorized to decide.
     - 6 when the persisted pack exists but cannot be read back.
@@ -1536,18 +1521,20 @@ def _cmd_approve(args: argparse.Namespace, *, out) -> int:
 
 
 def _cmd_reject(args: argparse.Namespace, *, out) -> int:
-    """Reject the current ApprovalPack for one client (MKT-11A + MKT-11B,
-    D-11.5).
+    """Reject one specific approval for one client (MKT-11A/11B/11E).
 
     Wraps :meth:`core.approval.ApprovalPackBuilder.reject`. ``--reason``
     is mandatory — enforced at the application layer. Idempotent when the
     pack is already REJECTED (exit 0, warning surfaced). ``--approval-id``
-    is optional verification only (D-11B.2).
+    selects the real, versioned approval; when omitted, resolves the
+    client's pending approvals (one → used; zero or more than one →
+    structured error, never guessed).
 
     Exit codes (see ``core.application.exit_codes.ExitCode``):
     - 0 on success (including the idempotent no-op case).
-    - 2 when ``--reason`` is empty.
-    - 3 when there is no ApprovalPack, or ``--approval-id`` mismatches.
+    - 2 when ``--reason`` is empty, or ``--approval-id`` is omitted and
+      more than one approval is pending for the client (ambiguous).
+    - 3 when the approval does not exist for the client.
     - 4 when the transition is invalid (e.g. the pack is already APPROVED).
     - 5 when the actor's role is not authorized to decide.
     - 6 when the persisted pack exists but cannot be read back.
@@ -2922,12 +2909,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_appr_list.add_argument(
+        "--job-id", dest="job_id", default=None, help="narrow to the approval associated with one job",
+    )
+    p_appr_list.add_argument(
         "--limit", type=int, default=None, help="cap the number of rows returned",
     )
     p_appr_list.set_defaults(func=_cmd_approvals_list)
 
     p_appr_show = appr_subs.add_parser(
-        "show", help="show the current ApprovalPack for one client",
+        "show", help="show one approval for a client",
     )
     p_appr_show.add_argument("--client", required=True, help="client slug")
     p_appr_show.add_argument(
@@ -2939,7 +2929,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--approval-id",
         dest="approval_id",
         default=None,
-        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+        help=(
+            "the approval to show (real, versioned identity). If omitted, "
+            "resolves the client's sole pending approval when unambiguous."
+        ),
     )
     p_appr_show.set_defaults(func=_cmd_approvals_show)
 
@@ -2965,7 +2958,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--approval-id",
         dest="approval_id",
         default=None,
-        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+        help="the approval to act on (real, versioned identity). If omitted, resolves the client's sole pending approval when unambiguous.",
     )
     p_approve.add_argument(
         "--correlation-id",
@@ -2997,7 +2990,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--approval-id",
         dest="approval_id",
         default=None,
-        help="verify the loaded pack's pack_id matches (optional; no lookup index exists)",
+        help="the approval to act on (real, versioned identity). If omitted, resolves the client's sole pending approval when unambiguous.",
     )
     p_reject.add_argument(
         "--correlation-id",

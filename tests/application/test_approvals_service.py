@@ -25,7 +25,8 @@ def _seed_pack(
         updated_at=now,
         state=state,
     )
-    mem.put(client_slug, APPROVAL_PACK_KIND, SINGLETON_ID, pack.model_dump(mode="json"))
+    # MKT-11E: persisted under its own pack_id, not the "current" singleton.
+    mem.put(client_slug, APPROVAL_PACK_KIND, pack.pack_id, pack.model_dump(mode="json"))
     return pack
 
 

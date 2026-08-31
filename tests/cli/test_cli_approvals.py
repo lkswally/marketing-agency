@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cli.main import main
-from core.approval.approval_pack import APPROVAL_PACK_KIND, SINGLETON_ID
+from core.approval.approval_pack import APPROVAL_PACK_KIND
 from core.approval.models import ApprovalPack, ApprovalState
 from core.memory import JsonFileMemory
 
@@ -22,7 +22,7 @@ def _run(argv: list[str]) -> tuple[int, str]:
 
 def _seed_pack(
     root: Path, client: str, *, state: ApprovalState = ApprovalState.DRAFT,
-) -> None:
+) -> ApprovalPack:
     mem = JsonFileMemory(root)
     now = datetime.now(UTC)
     pack = ApprovalPack(
@@ -30,7 +30,9 @@ def _seed_pack(
         report_contract_version="campaign-strategy-report.v1",
         created_at=now, updated_at=now, state=state,
     )
-    mem.put(client, APPROVAL_PACK_KIND, SINGLETON_ID, pack.model_dump(mode="json"))
+    # MKT-11E: persisted under its own pack_id, not the "current" singleton.
+    mem.put(client, APPROVAL_PACK_KIND, pack.pack_id, pack.model_dump(mode="json"))
+    return pack
 
 
 # ---------- approvals list ----------

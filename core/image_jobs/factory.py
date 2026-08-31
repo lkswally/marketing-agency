@@ -33,8 +33,7 @@ from __future__ import annotations
 
 import contextlib
 
-from core.approval import APPROVAL_PACK_KIND, ApprovalPack
-from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
+from core.approval import repository as approval_repository
 from core.contracts import AuditEventType, AuditTrailEvent
 from core.creative import (
     CREATIVE_PACK_KIND,
@@ -126,9 +125,9 @@ class ImageJobFactory:
 
     def build(self, client_slug: str) -> ImageGenerationJobPack:
         visual = self._load_visual_pack(client_slug)
-        approval = self._optional_load(
-            client_slug, APPROVAL_PACK_KIND, APPROVAL_SINGLETON, ApprovalPack,
-        )
+        # MKT-11E compatibility shim — latest approval, resolved
+        # dynamically. See core.approval.repository.
+        approval = approval_repository.get_latest_for_client(self._memory, client_slug)
         creative = self._optional_load(
             client_slug, CREATIVE_PACK_KIND, CREATIVE_SINGLETON, CreativeAssetPack,
         )

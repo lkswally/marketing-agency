@@ -34,7 +34,6 @@ from core.approval import (
     APPROVAL_PACK_KIND,
     ApprovalPackBuilder,
 )
-from core.approval import SINGLETON_ID as APPROVAL_SINGLETON
 from core.approval import (
     render_markdown_pack as render_approval_markdown,
 )
@@ -524,7 +523,13 @@ class PipelineOrchestrator:
     def _stage_approval(self, client_slug: str, report):
         started_at = utcnow()
         builder = ApprovalPackBuilder(memory=self._memory)
-        pack = builder.build_from_report(report)
+        # MKT-11E: every run builds and persists a NEW approval (fresh
+        # pack_id) — never overwrites a prior approval for this client.
+        # job_id/correlation_id are threaded through only when this
+        # orchestrator instance is driven by the job system.
+        pack = builder.build_from_report(
+            report, job_id=self._job_id, correlation_id=self._correlation_id,
+        )
         builder.persist(pack)
 
         outputs_dir = self._outputs_dir_for(client_slug)
@@ -551,7 +556,7 @@ class PipelineOrchestrator:
             started_at=started_at,
             finished_at=utcnow(),
             artifact_refs=[str(md_path), str(json_path)],
-            memory_refs=[f"{APPROVAL_PACK_KIND}/{APPROVAL_SINGLETON}"],
+            memory_refs=[f"{APPROVAL_PACK_KIND}/{pack.pack_id}"],
         )
         return stage, pack
 
