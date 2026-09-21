@@ -139,17 +139,21 @@ For client `acme-bootstrapped`, `data/clients/acme-bootstrapped/`:
 client_intake/current.json
 intake_validation/current.json
 campaign_strategy_report/current.json
-approval_pack/current.json
+approval_pack/<pack_id>.json      ← MKT-11E: versioned, one file per run
 creative_asset_pack/current.json
 visual_direction_pack/current.json
 campaign_run_summary/current.json
 audit/YYYY-MM-DD.jsonl     ← append-only, hash-chained
 ```
 
-`campaign_run_summary` is overwritten on each run, but the audit trail
-JSONL grows monotonically. To replay history, walk
+`campaign_run_summary` is overwritten on each run; `approval_pack` is
+**not** — since MKT-11E every run persists a new approval keyed by its
+own `pack_id`, never overwriting a prior client approval (pre-MKT-11E
+this was a `current.json` singleton). The audit trail JSONL grows
+monotonically regardless. To replay history, walk
 `mem.read_audit_events(client_slug)` and filter for
-`payload.campaign_pipeline.action`.
+`payload.campaign_pipeline.action` (pipeline stage events) or
+`payload.approval_pack.action` (approval decisions).
 
 ## Determinism
 

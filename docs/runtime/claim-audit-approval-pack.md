@@ -1,6 +1,8 @@
 # Claim Audit + Approval Pack (MKT-3B)
 
-> Status: **implemented** (MKT-3B).
+> Status: **implemented** (MKT-3B), persistence + identity model updated by
+> **MKT-11E** (versioned approval history — see
+> `docs/MKT-11E-VERSIONED-APPROVAL-INVENTORY.md`).
 > Module: `core.approval`.
 > Backend: rules-based, deterministic (no LLM, no API, no MCP).
 > Contract: `approval-pack.v1`.
@@ -65,8 +67,8 @@ ApprovalPack  (state=draft, blocks_publish derived)
         ▼
 ApprovalPackBuilder.persist(pack)
         │
-        │ writes:
-        │   data/clients/<slug>/approval_pack/current.json
+        │ writes (MKT-11E: versioned, one file per approval):
+        │   data/clients/<slug>/approval_pack/<pack_id>.json
         │ emits audit event:
         │   approval_pack created
         │
@@ -91,8 +93,15 @@ Terminal state
 
 ### 2.2 Memory kind
 
-- `approval_pack` — singleton id `"current"` per client (consistent with
-  the strategy report convention from MKT-3A).
+- `approval_pack` — **versioned since MKT-11E**: one file per approval,
+  keyed by the pack's own `pack_id` (`data/clients/<slug>/approval_pack/<pack_id>.json`).
+  Multiple approvals can coexist per client; nothing overwrites a prior
+  approval. `pack_id` is the canonical identity — the application/CLI
+  layer calls it `approval_id`, same value, no second identifier.
+  `core.approval.repository` provides `list_for_client`,
+  `list_pending_for_client`, `get_latest_for_client` for querying
+  history. (Pre-MKT-11E behavior was a singleton id `"current"` — no
+  longer written.)
 
 ### 2.3 Audit events
 
@@ -284,9 +293,12 @@ builder.persist(pack)
 # 3. (Human reviews via Markdown render)
 print(render_markdown_pack(pack))
 
-# 4. Transitions
-builder.submit_for_review(report.client_slug)
-final = builder.approve(report.client_slug, reviewer="lucas", notes="Aprobado")
+# 4. Transitions — MKT-11E: mutations take the real approval_id
+# (== pack.pack_id), not just the client_slug.
+builder.submit_for_review(report.client_slug, pack.pack_id)
+final = builder.approve(
+    report.client_slug, pack.pack_id, reviewer="lucas", notes="Aprobado",
+)
 
 assert final.blocks_publish is False
 ```

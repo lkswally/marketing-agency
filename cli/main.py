@@ -3240,7 +3240,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # run-campaign
     p_rc = subs.add_parser(
         "run-campaign",
-        help="run the full campaign pipeline (intake → strategy → approval → creative → visual) in one command",
+        help="run the full campaign pipeline (intake -> strategy -> approval -> creative -> visual) in one command",
     )
     p_rc.add_argument("--intake", required=True, help="path to the intake JSON file")
     p_rc.add_argument(
