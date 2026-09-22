@@ -10,8 +10,13 @@
 - **Minimum required:** `>=3.11` (`pyproject.toml`).
 - **CI-tested version:** 3.11, on `ubuntu-latest` (`.github/workflows/ci.yml`).
 - **Local dev venv observed:** 3.14.5 (Windows) — works, but is *ahead* of
-  what CI actually exercises. **Recommendation: target Python 3.11 on the
-  VPS**, matching CI, not the newer local dev interpreter.
+  what CI actually exercises.
+- **VPS validation (reported by operator, VPS-02A):** Python **3.12.3** on
+  the target ARM64 VPS — `pip install -e ".[dev,portal]"` PASS, full suite
+  (2159 tests) PASS, `ruff check .` PASS, portal PASS. This is the first
+  confirmation on the actual target architecture/OS, reported from a
+  separate session against the real host — not independently re-verified
+  from this repo checkout.
 
 ## Install
 
@@ -70,14 +75,63 @@ mkt portal --root data/clients --outputs-dir outputs
   operationally valuable (reports already delivered to a client). Gitignored
   except `outputs/.gitkeep`.
 - `assets/clients/<slug>/` — per-client binary assets. Gitignored except
-  `assets/clients/.gitkeep`.
+  `assets/clients/.gitkeep`. **Verified in VPS-02A: this is a convention
+  only** — `core/domain/asset.py`'s `Asset.path` is a freeform
+  `str | None`, and no runtime code resolves or writes to a literal
+  `assets/` root. There is no `--assets-dir` flag anywhere in the CLI.
+  Nothing in `core/`/`cli/` currently reads or writes real files under
+  `assets/clients/` — it exists today only as a documented taxonomy
+  (`ARCHITECTURE.md` D7) and a `.gitignore` rule, not as implemented I/O.
 
-**What must persist across deploys/restarts on the VPS:** `data/clients/`,
-`outputs/`, `assets/clients/` (whatever exists under them for real clients).
+**What must persist across deploys/restarts on the VPS:** `data/clients/`
+and `outputs/` — confirmed, real, actively read/written by every command
+via `--root`/`--outputs-dir`. `assets/clients/` should be provisioned on
+the VPS for forward-compatibility (per the taxonomy) but there is nothing
+to migrate today, since nothing writes there yet.
 
 **What must stay OUT of the repo / version control:** everything already
 excluded by `.gitignore` — `.env`, `data/*` (except the gitkeep), `outputs/*`
 (except the gitkeep), `.venv/`, `__pycache__/`, `.pytest_tmp*/`, `.ruff_cache/`.
+
+## Persistence path contract (proposed, VPS-02A)
+
+Audited: every command that touches client state exposes an explicit
+`--root` (35 occurrences across the CLI) and/or `--outputs-dir` (25
+occurrences) flag — there is no command that silently writes to a
+hardcoded absolute path. Defaults are relative (`data/clients`, `outputs`,
+resolved from the process's working directory) purely as a local-dev
+convenience; every real invocation is expected to pass explicit paths.
+
+Confirmed chain of default-vs-override, top to bottom:
+
+- `cli/main.py::DEFAULT_DATA_ROOT = Path("data/clients")` — CLI-level
+  argparse default, overridden by `--root` on every subcommand that needs it.
+- `core/application/context.py::DEFAULT_DATA_ROOT` / `DEFAULT_OUTPUTS_ROOT`
+  — `OperationContext` pydantic field defaults, always overridden by the
+  CLI/job layer passing `root=Path(args.root)` explicitly.
+- `portal/app.py` — its own `--root`/`--outputs-dir` args (passed by the
+  `mkt portal` wrapper via `streamlit run ... -- --root X --outputs-dir Y`).
+- **`assets/` has no equivalent** — see finding above. Not a blocker (no
+  writer exists to relocate), but must be added before any code starts
+  actually writing binary assets.
+
+**Proposed contract for the target host layout**
+(`/opt/data/marketing-os/{clients,outputs,assets}`):
+
+| Concern | Value | Consumed by |
+|---|---|---|
+| Client state root | `/opt/data/marketing-os/clients` | `mkt --root /opt/data/marketing-os/clients ...` for every command; `mkt portal --root ...`; a future `campaign.run` job's `ctx.root` |
+| Outputs root | `/opt/data/marketing-os/outputs` | `--outputs-dir` on every command that generates artifacts; `mkt portal --outputs-dir ...` |
+| Assets root | `/opt/data/marketing-os/assets` | **Not yet consumed by any code.** Reserve the path now; wire a `--assets-dir` flag (or an `OperationContext.assets_root` field, mirroring `root`/`outputs_root`) when a real asset-writing feature lands. |
+| How the CLI/jobs receive these | Explicit flags, never env-var-implicit | Already true today — no code change needed for `--root`/`--outputs-dir`. A future systemd unit or Docker Compose service should set them via command args or a wrapper script, not rely on the relative defaults. |
+| How the portal receives these | Same flags, forwarded by `mkt portal` to the Streamlit subprocess | Already true today. |
+| How Docker Compose should wire it (VPS-02B) | Bind-mount `/opt/data/marketing-os/{clients,outputs,assets}` on the host to fixed paths inside the container (e.g. `/data/clients`, `/data/outputs`, `/data/assets`), then pass `--root /data/clients --outputs-dir /data/outputs` (and, once it exists, `--assets-dir /data/assets`) as the container command's fixed arguments. | Proposed for VPS-02B — not implemented, no symlinks, no data moved. |
+
+This contract requires **zero code changes** for `clients`/`outputs` — the
+flags already exist and are already honored end-to-end. It requires **one
+new flag** (`--assets-dir` or equivalent) before `assets/` can be part of
+the same contract, and that flag has no urgency until a real asset writer
+exists.
 
 ## Environment variables (see `.env.example` for the authoritative list)
 
@@ -125,16 +179,17 @@ for the VPS phase, not a documentation gap.
 
 ## ARM64
 
-**NOT VERIFIED.** No native ARM64 test has been run — this dev environment
-is x86_64 Windows, and CI runs on `ubuntu-latest` (x86_64 GitHub-hosted
-runners). If the target Oracle Cloud VPS is an Ampere/ARM64 shape:
-- Core dependencies (`pydantic`, `pyyaml`) ship ARM64 wheels for recent
-  CPython — likely fine, but not confirmed on this exact stack.
-- Optional extras (`anthropic`, `notion-client`, `streamlit`, and
-  transitively any Google SDKs for `[claude]`/`[portal]`/analytics
-  connectors) have not been checked for ARM64 wheel availability.
-- **Action for the VPS thread:** `pip install -e ".[dev]"` on the actual
-  ARM64 instance and run the full test suite there before trusting it.
+**PASS — validated on the real target VPS (reported by operator, VPS-02A),
+not independently re-run from this checkout.** Python 3.12.3,
+`pip install -e ".[dev,portal]"`, full suite (2159 tests), `ruff check .`,
+and the portal all passed natively on the Oracle Cloud ARM64/Ampere
+instance. This supersedes the earlier "not verified" status from the
+x86_64-only dev/CI environments.
+
+Still not verified on that VPS run: the `claude` and `notion` extras
+(`anthropic`, `notion-client` SDKs) and the Google analytics connector SDKs
+— only `[dev,portal]` was installed. Verify those specifically if/when the
+corresponding integration is turned on.
 
 ## Checklist for the VPS thread
 
