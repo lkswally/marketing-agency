@@ -5,6 +5,25 @@
 and auditing at every transition. No thread, no process, no external
 queue — this runner IS the execution, on the calling thread, right now.
 
+**Execution lock (job-execution-robustness).** ``run()`` holds a per-job
+:class:`~core.memory.filelock.FileLock` for its entire duration —
+acquired *before* the authoritative state is (re-)read, released in a
+``finally`` no matter how execution ends. This closes the
+check-then-act race a purely in-memory/sequential guard cannot: two
+concurrent callers (threads or separate OS processes on this host) racing
+``run()`` on the same ``job_id`` now have exactly one winner; the other(s)
+get a structured :class:`JobTransitionError`, never a duplicate handler
+execution. See ``core/memory/filelock.py`` for exactly what this
+mechanism guarantees (single host, real filesystem) and does not
+(distributed / network-filesystem safety is NOT claimed).
+
+The lock represents *active execution*, not ownership of the job until a
+human decision — it is released the moment ``run()`` returns, including
+on a ``WAITING_APPROVAL`` outcome. A second ``run()`` call on that same
+job afterwards is still rejected, but by the state machine (the record is
+no longer ``QUEUED``), not by the lock — lock lifecycle and state-machine
+enforcement are deliberately two separate mechanisms.
+
 Never imports ``argparse`` — this module is a pure application-layer
 component; the CLI adapter is the only place argument parsing happens.
 """
@@ -18,17 +37,20 @@ from core.application.result import ErrorCode
 from core.contracts import AuditEventType, AuditTrailEvent
 from core.domain.base import utcnow
 from core.memory import EntityNotFound, Memory
+from core.memory.filelock import FileLock
 
 from .models import JobError, JobOutcome, JobOutcomeStatus, JobRecord, JobState, can_transition
 from .registry import JobRegistry, UnknownOperationError, default_registry
 from .repository import JobPersistenceError, JobRepository, sanitize_params
 
 _ACTOR = "job_runner"
+_LOCKS_DIRNAME = "_locks"
 
 
 class JobTransitionError(RuntimeError):
     """Raised when a caller asks the runner to advance a job past a
-    transition the state machine forbids. Callers map this to
+    transition the state machine forbids, OR when a concurrent ``run()``
+    on the same job lost the execution-lock race. Callers map this to
     ``ErrorCode.INVALID_STATE_TRANSITION`` — never let it propagate raw."""
 
 
@@ -42,6 +64,11 @@ class InlineJobRunner:
         self._root = root
         self._repo = JobRepository(memory)
         self._registry = registry or default_registry
+
+    def _job_lock(self, client_slug: str, job_id: str) -> FileLock:
+        return FileLock(
+            self._root / client_slug / _LOCKS_DIRNAME / f"job_{job_id}.lock"
+        )
 
     # ---------- submit ----------
 
@@ -79,34 +106,56 @@ class InlineJobRunner:
         """Execute a QUEUED job. Idempotent on COMPLETED (returns the
         existing record, no re-execution, no new audit event). Any other
         non-QUEUED state raises :class:`JobTransitionError`.
+
+        Holds this job's execution lock for the full call. A concurrent
+        caller that loses the lock race gets ``JobTransitionError``
+        immediately — it never reads stale state, never executes the
+        handler, never duplicates work. See the module docstring.
         """
-        record = self._load(client_slug, job_id)
-
-        if record.state is JobState.COMPLETED:
-            return record  # idempotent no-op — caller decides how to warn
-
-        if record.state is not JobState.QUEUED:
+        # No pre-lock read of any kind is used to decide anything here —
+        # acquire -> reload -> transition, strictly in that order, so the
+        # execution decision is always made against state read AFTER
+        # exclusivity is held, never before.
+        lock = self._job_lock(client_slug, job_id)
+        if not lock.try_acquire():
             raise JobTransitionError(
-                f"cannot run job {job_id!r} in state {record.state.value!r} "
-                "— only QUEUED jobs can be run"
+                f"cannot run job {job_id!r}: another execution is already "
+                "in progress (execution lock held by another caller)"
             )
-
-        self._transition(record, JobState.RUNNING, action="started")
-        record.started_at = utcnow()
-        self._repo.save(record)
-
         try:
-            spec = self._registry.resolve(record.operation)
-        except UnknownOperationError as e:
-            return self._fail(record, ErrorCode.UNKNOWN_OPERATION, str(e))
+            # Authoritative re-read, now that we hold exclusivity.
+            record = self._load(client_slug, job_id)
 
-        try:
-            params_model = spec.params_model.model_validate(record.params)
-            outcome = spec.handler(self._context_for(record), params_model)
-        except Exception as e:  # noqa: BLE001 — never let a handler crash the runner
-            return self._fail(record, ErrorCode.INTERNAL, f"{type(e).__name__}: {e}")
+            if record.state is JobState.COMPLETED:
+                return record  # another caller finished it while we waited
 
-        return self._apply_outcome(record, outcome)
+            if record.state is not JobState.QUEUED:
+                raise JobTransitionError(
+                    f"cannot run job {job_id!r} in state {record.state.value!r} "
+                    "— only QUEUED jobs can be run"
+                )
+
+            self._transition(record, JobState.RUNNING, action="started")
+            record.started_at = utcnow()
+            self._repo.save(record)
+
+            try:
+                spec = self._registry.resolve(record.operation)
+            except UnknownOperationError as e:
+                return self._fail(record, ErrorCode.UNKNOWN_OPERATION, str(e))
+
+            try:
+                params_model = spec.params_model.model_validate(record.params)
+                outcome = spec.handler(self._context_for(record), params_model)
+            except Exception as e:  # noqa: BLE001 — never let a handler crash the runner
+                return self._fail(record, ErrorCode.INTERNAL, f"{type(e).__name__}: {e}")
+
+            return self._apply_outcome(record, outcome)
+        finally:
+            # Always released — the lock means "actively executing", not
+            # "owns the job until a human decision". A WAITING_APPROVAL
+            # outcome releases it exactly like COMPLETED/FAILED do.
+            lock.release()
 
     # ---------- cancel ----------
 
@@ -201,25 +250,31 @@ class InlineJobRunner:
         self._audit(record, action=action, from_state=from_state)
 
     def _audit(self, record: JobRecord, *, action: str, from_state: JobState | None) -> None:
-        prev = self._memory.last_audit_hash(record.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor=_ACTOR,
-            occurred_at=utcnow(),
-            client_slug=record.client_slug,
-            payload={
-                "job": {
-                    "action": action,
-                    "job_id": record.job_id,
-                    "operation": record.operation,
-                    "from_state": from_state.value if from_state else None,
-                    "to_state": record.state.value,
-                    "correlation_id": record.correlation_id,
-                }
-            },
-            prev_hash=prev,
-        )
-        self._memory.append_audit_event(event)
+        # append_audit_event_atomic reads the chain tail and builds the
+        # event from it inside one held lock — closes the race a
+        # separate last_audit_hash() read + append_audit_event() call
+        # would leave open between two DIFFERENT jobs for the same
+        # client appending concurrently (see core/memory/json_file.py).
+        def _build(prev: str | None) -> AuditTrailEvent:
+            return AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor=_ACTOR,
+                occurred_at=utcnow(),
+                client_slug=record.client_slug,
+                payload={
+                    "job": {
+                        "action": action,
+                        "job_id": record.job_id,
+                        "operation": record.operation,
+                        "from_state": from_state.value if from_state else None,
+                        "to_state": record.state.value,
+                        "correlation_id": record.correlation_id,
+                    }
+                },
+                prev_hash=prev,
+            )
+
+        event = self._memory.append_audit_event_atomic(record.client_slug, _build)
         record.audit_event_ids.append(event.event_id)
 
 
