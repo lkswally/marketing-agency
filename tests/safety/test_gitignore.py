@@ -25,19 +25,19 @@ def _git_check_ignore(path: str) -> bool:
 
 
 @pytest.mark.parametrize("path", [
-    "data/lexia",
+    "data/legalcase-demo",
     "data/acme",
     "data/testclient",
     "data/real-corp",
-    "data/lexia/approval_pack/current.json",
-    "data/lexia/audit/2026-06-01.jsonl",
+    "data/legalcase-demo/approval_pack/current.json",
+    "data/legalcase-demo/audit/2026-06-01.jsonl",
 ])
 def test_client_data_is_ignored(path):
     assert _git_check_ignore(path), f"Expected {path!r} to be gitignored"
 
 
 @pytest.mark.parametrize("path", [
-    "outputs/lexia",
+    "outputs/legalcase-demo",
     "outputs/acme/campaign-strategy.md",
 ])
 def test_outputs_are_ignored(path):

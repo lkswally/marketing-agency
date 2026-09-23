@@ -1,6 +1,7 @@
 """MKT-9B regression tests for the portal registry fixes.
 
-After the LEXIA Alpha Pilot we discovered the portal reported
+After a real-business alpha pilot (anonymized here as LEGALCASE DEMO) we
+discovered the portal reported
 ``Campaign strategy`` and ``n8n execution plan`` as MISSING even
 though both packs were persisted. Root cause: the registry used
 the wrong ``kind`` values. These tests pin the correct values so

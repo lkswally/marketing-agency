@@ -156,7 +156,7 @@ def _extract_product_features(brief: StrategyInputBrief) -> list[str]:
     The intake's ``product_or_service`` is typically a string with a
     feature list after a colon or em-dash::
 
-        "LEXIA — software de gestión legal para abogados y estudios
+        "LegalCase Demo — software de gestión legal para abogados y estudios
          jurídicos: expedientes, vencimientos, tareas, honorarios,
          seguimiento judicial, informes a clientes y antecedentes."
 
@@ -237,7 +237,7 @@ def _extract_pains_from_intake(brief: StrategyInputBrief) -> list[str]:
         return explicit[:5]
 
     pains: list[str] = []
-    # MKT-9C: anti-pattern detection goes first so an LEXIA-shaped
+    # MKT-9C: anti-pattern detection goes first so a LegalCase-Demo-shaped
     # intake (with Excel / WhatsApp / carpetas in the audience
     # description) ALWAYS gets the synthetic "Procesos dispersos
     # en ..." pain — that's the most operationally meaningful one
@@ -292,7 +292,7 @@ def _sanitize_forbidden(text: str, banned_words: list[str]) -> str:
     """Scrub a generated string of phrases the client banned.
 
     The templated backend has been audited and does NOT currently
-    emit any of LEXIA's forbidden phrases — this helper exists as
+    emit any of LegalCase Demo's forbidden phrases — this helper exists as
     a safety net for future template changes and downstream LLM
     backends. It performs a case-insensitive substring replacement
     leaving ``[REDACTED]`` in place so the operator notices.
@@ -442,7 +442,7 @@ def generate_target_audience(brief: StrategyInputBrief) -> TargetAudience:
     pains = _extract_pains_from_intake(brief)
     # MKT-9C: derive desired outcomes from the preferred_words
     # vocabulary when the intake didn't supply explicit ones —
-    # e.g. for LEXIA the lexicon is ``["claridad","orden",...]``,
+    # e.g. for LegalCase Demo the lexicon is ``["claridad","orden",...]``,
     # which makes a more meaningful outcome list than the legacy
     # ``"Lograr qualified demo requests"`` echo.
     if not [o for o in outcomes if o]:
@@ -860,7 +860,7 @@ def generate_keyword_plan(
 
     # MKT-9C: seed concrete domain features extracted from the
     # intake's product description BEFORE differentiator tokens.
-    # For LEXIA these surface as ``expedientes``, ``vencimientos``,
+    # For LegalCase Demo these surface as ``expedientes``, ``vencimientos``,
     # ``honorarios`` etc. — the vocabulary actual prospects search
     # for, far more valuable than the generic differentiator
     # tokens.

@@ -1,12 +1,12 @@
 {
   "schema_version": "client-intake.v1",
-  "client_name": "LEXIA",
+  "client_name": "LEGALCASE DEMO",
   "industry": "legaltech",
   "market": "AR-LATAM",
-  "product_or_service": "LEXIA — software de gestión legal para abogados y estudios jurídicos: expedientes, vencimientos, tareas, honorarios, seguimiento judicial, informes a clientes y antecedentes.",
+  "product_or_service": "LegalCase Demo — software de gestion legal para abogados y estudios juridicos: expedientes, vencimientos, tareas, honorarios, seguimiento judicial, informes a clientes y antecedentes.",
   "product_type": "subscription",
-  "audience_description": "Abogados independientes y estudios jurídicos chicos y medianos (30-55 años) que hoy gestionan con Excel, WhatsApp, carpetas y recordatorios manuales y necesitan orden, seguimiento, trazabilidad y mejor comunicación con clientes.",
-  "commercial_objective": "Generar leads cualificados que pidan una demo comercial de LEXIA en los próximos 90 dias",
+  "audience_description": "Abogados independientes y estudios juridicos chicos y medianos (30-55 anios) que hoy gestionan con Excel, WhatsApp, carpetas y recordatorios manuales y necesitan orden, seguimiento, trazabilidad y mejor comunicacion con clientes.",
+  "commercial_objective": "Generar leads cualificados que soliciten una demo comercial de LegalCase Demo en los proximos 90 dias (fixture sintetico de testing, sin datos comerciales reales)",
   "brand_tone": [
     "profesional",
     "claro",
@@ -46,29 +46,29 @@
   ],
   "known_competitors": [
     {
-      "name": "Lex Doctor",
-      "url": "https://lexdoctor.example",
-      "notes": "Producto histórico del mercado argentino — instalado en muchos estudios; UX heredada de hace años."
+      "name": "CaseFlow Pro",
+      "url": "https://caseflowpro.example",
+      "notes": "Fixture sintetico de testing — producto de referencia con instalacion tradicional y UX heredada."
     },
     {
-      "name": "Nubijus",
-      "url": "https://nubijus.example",
-      "notes": "Solución cloud con foco en estudios medianos."
+      "name": "JurisTrack",
+      "url": "https://juristrack.example",
+      "notes": "Fixture sintetico de testing — solucion cloud orientada a estudios medianos."
     },
     {
-      "name": "CaseTracking",
-      "url": "https://casetracking.example",
-      "notes": "Foco en seguimiento de causas; ecosistema regional."
+      "name": "ExpedienteCloud",
+      "url": "https://expedientecloud.example",
+      "notes": "Fixture sintetico de testing — foco en seguimiento de causas."
     },
     {
       "name": "Excel / gestion manual",
       "url": "https://www.microsoft.com/excel",
-      "notes": "El verdadero competidor — la mayoria de estudios chicos vive en planillas y WhatsApp."
+      "notes": "El competidor real en este vertical — la mayoria de estudios chicos vive en planillas y WhatsApp."
     }
   ],
-  "budget_estimate": 4000,
+  "budget_estimate": 3200,
   "budget_currency": "USD",
-  "deadline": "2026-09-30",
+  "deadline": "2027-03-31",
   "duration_weeks": 12,
   "primary_kpi": "qualified_demo_requests",
   "locale": "es-AR",

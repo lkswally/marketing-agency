@@ -1,6 +1,7 @@
 """MKT-9B regression test: the creative pack must not be empty.
 
-Alpha Pilot 1 with LEXIA gave the operator the impression the
+A real-business alpha pilot (anonymized here as the LEGALCASE DEMO
+synthetic fixture) gave the operator the impression the
 ``creative_asset_pack`` was empty because the JSON has no
 top-level ``assets`` field — the pack uses 5 typed lists
 (``social_posts`` / ``emails`` / ``reels`` / ``flyers`` /
@@ -18,7 +19,7 @@ from pathlib import Path
 from cli.main import main
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LEXIA_INTAKE = REPO_ROOT / "examples" / "intake" / "lexia.json"
+LEGALCASE_DEMO_INTAKE = REPO_ROOT / "examples" / "intake" / "legalcase-demo.json"
 
 
 def _run(argv: list[str]) -> tuple[int, str]:
@@ -27,19 +28,19 @@ def _run(argv: list[str]) -> tuple[int, str]:
     return code, out.getvalue()
 
 
-def test_lexia_creative_pack_has_assets_across_all_typed_lists(
+def test_legalcase_demo_creative_pack_has_assets_across_all_typed_lists(
     tmp_path: Path,
 ) -> None:
     code, stdout = _run([
         "run-campaign",
-        "--intake", str(LEXIA_INTAKE),
+        "--intake", str(LEGALCASE_DEMO_INTAKE),
         "--root", str(tmp_path / "mem"),
         "--outputs-dir", str(tmp_path / "out"),
     ])
     assert code == 0, stdout
 
     pack_path = (
-        tmp_path / "mem" / "lexia" / "creative_asset_pack" / "current.json"
+        tmp_path / "mem" / "legalcase-demo" / "creative_asset_pack" / "current.json"
     )
     pack = json.loads(pack_path.read_text(encoding="utf-8"))
     # Each typed list must have at least one entry — drafts from the
