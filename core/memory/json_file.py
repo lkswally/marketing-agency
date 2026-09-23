@@ -10,7 +10,17 @@ Storage layout (see ``docs/storage-layout.md``):
             _chain_tail.txt             # hex hash of the last appended event
 
 Writes are atomic on POSIX and Windows via "write to temp + os.replace".
-Audit appends use ``mode="a"`` (O_APPEND) — single-process safe.
+
+Audit appends (job-execution-robustness): the full
+read-tail -> validate prev_hash -> append line -> update tail sequence is
+one critical section, protected by a per-client
+:class:`~core.memory.filelock.FileLock` (``<client>/_locks/audit.lock`` —
+a separate path from any job's execution lock; a job's lock protects one
+job, this protects one client's whole audit stream, since two DIFFERENT
+jobs for the same client legitimately write to it concurrently). Acquired
+with a bounded, cross-platform poll-based wait — never an indefinite
+hang, never a raw ``OSError``/``PermissionError`` surfacing to the
+caller; a real timeout raises :class:`~core.memory.filelock.LockTimeoutError`.
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +40,9 @@ from core.domain.base import validate_slug
 
 from .base import MEMORY_CONTRACT_VERSION, Memory, validate_kind
 from .errors import AuditChainError, EntityNotFound
+from .filelock import FileLock
+
+_AUDIT_LOCK_TIMEOUT_SECONDS = 10.0
 
 # Entity ids appear in file names. Restrict to a safe alphabet to prevent
 # directory traversal and odd filesystem behavior.
@@ -102,6 +116,9 @@ class JsonFileMemory(Memory):
     def _chain_tail_path(self, client_slug: str) -> Path:
         return self._audit_dir(client_slug) / "_chain_tail.txt"
 
+    def _audit_lock_path(self, client_slug: str) -> Path:
+        return self._client_dir(client_slug) / "_locks" / "audit.lock"
+
     def _meta_path(self, client_slug: str) -> Path:
         return self._client_dir(client_slug) / "_meta.json"
 
@@ -155,14 +172,78 @@ class JsonFileMemory(Memory):
     # -------- audit trail --------
 
     def append_audit_event(self, event: AuditTrailEvent) -> None:
+        """Append a pre-built event. The write itself (append line +
+        update chain tail) is protected by the per-client audit lock, so
+        this can no longer corrupt the tail file under concurrent writers
+        (the original bug this module's job-execution-robustness work
+        fixed). It does **not** close the earlier race window: whichever
+        code built ``event`` computed its ``prev_hash`` by calling
+        :meth:`last_audit_hash` *before* this method — and therefore
+        before this lock — was acquired. Two concurrent callers using
+        this method directly can still both read the same tail and both
+        build an event chained to it; the second one to reach the lock
+        here will correctly raise :class:`AuditChainError` (loud,
+        structured, never silent corruption) rather than succeed, but
+        that caller's work is lost, not retried.
+
+        :meth:`append_audit_event_atomic` closes that window completely
+        by building the event *inside* the lock, and is what
+        :mod:`core.jobs.runner` uses. Other current callers
+        (:mod:`core.approval.approval_pack`, :mod:`core.pipeline.orchestrator`)
+        still use this method with the older external-prev_hash pattern —
+        migrating them is out of scope for this milestone, which targets
+        the demonstrated job-execution-driven race specifically. Documented
+        here, not silently left as an unstated gap.
+        """
         if event.client_slug is None:
             raise ValueError(
                 "JsonFileMemory.append_audit_event requires event.client_slug "
                 "to be set (storage is multi-tenant)"
             )
         client_slug = event.client_slug
-        # Re-validate the slug. The contract already does, but defense in depth.
         validate_slug(client_slug)
+
+        lock = FileLock(self._audit_lock_path(client_slug))
+        lock.acquire(timeout=_AUDIT_LOCK_TIMEOUT_SECONDS)
+        try:
+            self._append_audit_event_locked(event)
+        finally:
+            lock.release()
+
+    def append_audit_event_atomic(
+        self, client_slug: str, build_event: Callable[[str | None], AuditTrailEvent],
+    ) -> AuditTrailEvent:
+        """Read the current chain tail, build the event from it, and
+        append it — all inside one held lock, so the ``prev_hash`` the
+        event is chained to is guaranteed still current at write time.
+        ``build_event(prev_hash)`` must construct and return the fully
+        chained :class:`AuditTrailEvent` (its own ``.hash`` already
+        computed from that ``prev_hash``) — this method does not, and
+        cannot, patch an already-built event's hash after the fact.
+        Returns the event that was actually appended.
+        """
+        validate_slug(client_slug)
+        lock = FileLock(self._audit_lock_path(client_slug))
+        lock.acquire(timeout=_AUDIT_LOCK_TIMEOUT_SECONDS)
+        try:
+            prev = self.last_audit_hash(client_slug)
+            event = build_event(prev)
+            if event.client_slug != client_slug:
+                raise ValueError(
+                    f"build_event returned an event for client_slug="
+                    f"{event.client_slug!r}, expected {client_slug!r}"
+                )
+            self._append_audit_event_locked(event)
+            return event
+        finally:
+            lock.release()
+
+    def _append_audit_event_locked(self, event: AuditTrailEvent) -> None:
+        """Write side only — caller MUST already hold the per-client audit
+        lock. Validates prev_hash against the (still-locked, so still
+        current) tail, appends the line, updates the tail atomically."""
+        client_slug = event.client_slug
+        assert client_slug is not None  # enforced by both public callers above
 
         last = self.last_audit_hash(client_slug)
         if event.prev_hash != last:

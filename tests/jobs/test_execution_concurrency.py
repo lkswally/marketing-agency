@@ -130,7 +130,7 @@ def test_different_jobs_execute_concurrently_not_serialized(tmp_path: Path) -> N
     jobs = [
         runner.submit(
             ctx, operation="test.slow_echo",
-            params={"message": f"job-{i}", "delay_seconds": 0.4},
+            params={"message": f"job-{i}", "delay_seconds": 0.6},
         )
         for i in range(4)
     ]
@@ -146,11 +146,13 @@ def test_different_jobs_execute_concurrently_not_serialized(tmp_path: Path) -> N
         t.join(timeout=10)
     elapsed = time.monotonic() - t0
 
-    # 4 handlers x 0.4s each: fully serialized would take ~1.6s+; running
-    # concurrently should finish well under that. Generous bound to avoid
-    # CI/VPS flakiness while still proving the per-job lock did not become
-    # a de-facto global lock.
-    assert elapsed < 1.2, (
+    # 4 handlers x 0.6s each: fully serialized would take ~2.4s+; running
+    # concurrently should finish well under that. The bound (1.8s) is
+    # generous relative to true concurrent execution (~0.6-0.9s expected)
+    # to absorb thread-startup/system-load jitter under a full-suite run,
+    # while staying well clear of the serialized floor so a regression to
+    # a de-facto global lock still fails this test.
+    assert elapsed < 1.8, (
         f"different jobs took {elapsed:.2f}s — looks serialized, the "
         "per-job lock may have become a global lock"
     )

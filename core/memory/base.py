@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -114,3 +115,29 @@ class Memory(ABC):
 
         ``None`` when no event has been appended yet.
         """
+
+    def append_audit_event_atomic(
+        self, client_slug: str, build_event: Callable[[str | None], AuditTrailEvent],
+    ) -> AuditTrailEvent:
+        """Read the current chain tail, build the event from it via
+        ``build_event(prev_hash)``, and append it, all as one atomic unit
+        with respect to other concurrent callers for the same
+        ``client_slug`` (job-execution-robustness).
+
+        This closes a race :meth:`append_audit_event` alone cannot: a
+        caller that reads :meth:`last_audit_hash` and builds its event
+        *before* calling :meth:`append_audit_event` can lose a race to
+        another concurrent writer between that read and its own append.
+        Here, the read and the append happen under the same exclusivity.
+
+        Default implementation (correct, but NOT concurrency-safe —
+        provided so this stays a non-abstract, backward-compatible
+        addition to the interface rather than a breaking change to every
+        implementer): backends that need a real concurrency guarantee
+        (currently only :class:`~core.memory.json_file.JsonFileMemory`)
+        override this. Backends that don't override it inherit whatever
+        concurrency posture their own :meth:`append_audit_event` has.
+        """
+        event = build_event(self.last_audit_hash(client_slug))
+        self.append_audit_event(event)
+        return event
