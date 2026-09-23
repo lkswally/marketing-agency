@@ -83,6 +83,7 @@ from .models import (
     StageOutcome,
     StageResult,
 )
+from .progress import CampaignProgressTracker
 from .renderer import render_markdown_summary
 
 PIPELINE_RUN_KIND = "campaign_run_summary"
@@ -130,6 +131,24 @@ class PipelineOrchestrator:
         # driven by the job system (core/jobs/operations/campaign.py).
         self._job_id = job_id
         self._correlation_id = correlation_id
+        # job-execution-robustness: incremental progress checkpoint,
+        # created only once client_slug is known (after intake succeeds)
+        # and only when job-driven — see core/pipeline/progress.py.
+        self._progress: CampaignProgressTracker | None = None
+
+    # ---------- progress checkpoint helpers (no-op unless job-driven) ----------
+
+    def _progress_stage_starting(self, stage: StageId) -> None:
+        if self._progress is not None:
+            self._progress.stage_starting(stage)
+
+    def _progress_stage_finished(self, stage: StageId, outcome: StageOutcome) -> None:
+        if self._progress is not None:
+            self._progress.stage_finished(stage, outcome)
+
+    def _progress_stages_skipped(self, stage_ids: list[StageId]) -> None:
+        if self._progress is not None:
+            self._progress.stages_skipped(stage_ids)
 
     # ---------- public API ----------
 
@@ -175,6 +194,21 @@ class PipelineOrchestrator:
 
         client_slug = validation.client_slug
 
+        # job-execution-robustness: the checkpoint can only start once
+        # client_slug is known (intake's own job is to determine it) —
+        # intake's brief execution window before this point is not
+        # individually checkpointed; it has no external side effects and
+        # any failure there already returns via _finalize_failure above,
+        # before any job-driven state exists to reconcile. Record intake
+        # as already-completed the moment the tracker exists, since we
+        # only reach this line when it succeeded.
+        if self._job_id is not None:
+            self._progress = CampaignProgressTracker(
+                self._memory, job_id=self._job_id, client_slug=client_slug,
+                correlation_id=self._correlation_id,
+            )
+            self._progress.stage_finished(StageId.INTAKE, StageOutcome.SUCCEEDED)
+
         # Emit "pipeline started" once we know the slug.
         self._emit_event(
             client_slug=client_slug,
@@ -189,8 +223,10 @@ class PipelineOrchestrator:
         )
 
         # ----- Stage 2: strategy -----
+        self._progress_stage_starting(StageId.STRATEGY)
         strategy_result, report = self._stage_strategy(client_slug, brief_path)
         stages.append(strategy_result)
+        self._progress_stage_finished(StageId.STRATEGY, strategy_result.outcome)
         if strategy_result.outcome is StageOutcome.FAILED:
             return self._finalize_failure(
                 started_at=started_at,
@@ -200,8 +236,10 @@ class PipelineOrchestrator:
             )
 
         # ----- Stage 3: approval -----
+        self._progress_stage_starting(StageId.APPROVAL)
         approval_result, approval_pack = self._stage_approval(client_slug, report)
         stages.append(approval_result)
+        self._progress_stage_finished(StageId.APPROVAL, approval_result.outcome)
 
         if require_approval and approval_pack.blocks_publish:
             # Record skipped stages so the summary stays well-formed, then raise.
@@ -211,6 +249,7 @@ class PipelineOrchestrator:
                     note="skipped because --require-approval and approval blocks publish",
                 )
             )
+            self._progress_stages_skipped([StageId.CREATIVE, StageId.VISUAL])
             summary = self._build_summary(
                 started_at=started_at,
                 stages=stages,
@@ -234,6 +273,7 @@ class PipelineOrchestrator:
                     note="skipped because --stop-on-blocked and approval blocks publish",
                 )
             )
+            self._progress_stages_skipped([StageId.CREATIVE, StageId.VISUAL])
             summary = self._build_summary(
                 started_at=started_at,
                 stages=stages,
@@ -271,6 +311,7 @@ class PipelineOrchestrator:
                     note="skipped — approval blocks publish",
                 )
             )
+            self._progress_stages_skipped([StageId.CREATIVE, StageId.VISUAL])
             summary = self._build_summary(
                 started_at=started_at,
                 stages=stages,
@@ -285,18 +326,23 @@ class PipelineOrchestrator:
             return self._finalize_summary(summary)
 
         # ----- Stage 4: creative -----
+        self._progress_stage_starting(StageId.CREATIVE)
         creative_result, creative_pack = self._stage_creative(
             client_slug, report, approval_pack
         )
         stages.append(creative_result)
+        self._progress_stage_finished(StageId.CREATIVE, creative_result.outcome)
 
         # ----- Stage 5: visual -----
+        self._progress_stage_starting(StageId.VISUAL)
         visual_result, visual_pack = self._stage_visual(
             client_slug, report, approval_pack, creative_pack
         )
         stages.append(visual_result)
+        self._progress_stage_finished(StageId.VISUAL, visual_result.outcome)
 
         # ----- Stage 6: summary -----
+        self._progress_stage_starting(StageId.SUMMARY)
         summary_start = utcnow()
         summary = self._build_summary(
             started_at=started_at,
@@ -328,6 +374,7 @@ class PipelineOrchestrator:
             PIPELINE_RUN_SINGLETON,
             summary.model_dump(mode="json"),
         )
+        self._progress_stage_finished(StageId.SUMMARY, StageOutcome.SUCCEEDED)
         return self._finalize_summary(summary)
 
     # ---------- stage implementations ----------
