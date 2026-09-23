@@ -124,7 +124,10 @@ def test_show_ok(tmp_path: Path) -> None:
     submitted = jobs.submit_job(ctx, operation="demo.echo", params={"message": "hi"})
     result = jobs.show_job(ctx, job_id=submitted.data.job_id)
     assert result.ok
-    assert result.data.job_id == submitted.data.job_id
+    assert result.data.job.job_id == submitted.data.job_id
+    # job-execution-robustness: a freshly-submitted (QUEUED) job's
+    # liveness question doesn't apply.
+    assert result.data.liveness.value == "not_applicable"
 
 
 def test_show_not_found(tmp_path: Path) -> None:
@@ -151,6 +154,7 @@ def test_list_ok(tmp_path: Path) -> None:
     result = jobs.list_jobs(ctx)
     assert result.ok
     assert len(result.data) == 2
+    assert {v.job.operation for v in result.data} == {"demo.echo"}
 
 
 def test_list_empty(tmp_path: Path) -> None:

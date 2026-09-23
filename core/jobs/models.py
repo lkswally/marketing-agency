@@ -187,6 +187,21 @@ class JobRecord(BaseModel):
     never reads it — with synchronous execution no other actor can set it
     and have it observed, so honouring it would be theatre."""
 
+    lock_protected: bool = False
+    """Set to ``True`` by :class:`~core.jobs.runner.InlineJobRunner` the
+    moment it transitions this record to ``RUNNING`` while holding this
+    job's execution lock (job-execution-robustness). Defaults to
+    ``False`` for every record persisted before this field existed —
+    additive, no contract-version bump needed.
+
+    Exists for exactly one purpose: distinguishing a legacy ``RUNNING``
+    record (persisted by code that never acquired any lock for it — its
+    liveness genuinely cannot be determined from the lock's current
+    state, because the lock's mere availability says nothing about a job
+    that was never protected by it) from a lock-aware one, where "the
+    lock can be freely acquired right now" IS a reliable stale-crash
+    signal. See :mod:`core.jobs.liveness`."""
+
     @field_validator("client_slug")
     @classmethod
     def _slug(cls, v: str) -> str:

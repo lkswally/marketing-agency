@@ -1683,7 +1683,7 @@ def _cmd_jobs_list(args: argparse.Namespace, *, out) -> int:
     )
     payload = {
         "count": len(result.data),
-        "jobs": [_job_payload(r) for r in result.data],
+        "jobs": [_job_payload(v.job, liveness=v.liveness) for v in result.data],
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
     return 0
@@ -1706,7 +1706,13 @@ def _cmd_jobs_show(args: argparse.Namespace, *, out) -> int:
         assert result.error is not None
         print(f"error: {result.error.message}", file=out)
         return exit_code_for(result.error.code)
-    print(json.dumps(_job_payload(result.data), indent=2, default=str), file=out)
+    print(
+        json.dumps(
+            _job_payload(result.data.job, liveness=result.data.liveness),
+            indent=2, default=str,
+        ),
+        file=out,
+    )
     return 0
 
 
@@ -1736,8 +1742,8 @@ def _cmd_jobs_cancel(args: argparse.Namespace, *, out) -> int:
     return _print_job_result(result, out=out)
 
 
-def _job_payload(record) -> dict:
-    return {
+def _job_payload(record, *, liveness=None) -> dict:
+    payload = {
         "job_id": record.job_id,
         "client_slug": record.client_slug,
         "operation": record.operation,
@@ -1755,6 +1761,12 @@ def _job_payload(record) -> dict:
         ),
         "approval_reason": record.approval_reason,
     }
+    # job-execution-robustness: only show/list resolve a liveness
+    # observation (submit/run/cancel don't — the record they return is
+    # already known-fresh at that instant, a probe would be redundant).
+    if liveness is not None:
+        payload["liveness"] = liveness.value
+    return payload
 
 
 def _print_job_result(result, *, out) -> int:

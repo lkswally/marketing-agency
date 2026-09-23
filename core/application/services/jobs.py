@@ -9,17 +9,19 @@ persistence rules live in :mod:`core.jobs`.
 
 from __future__ import annotations
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from core.jobs import (
     InlineJobRunner,
     JobPersistenceError,
+    JobRecord,
     JobRegistry,
     JobState,
     JobTransitionError,
     UnknownOperationError,
     default_registry,
 )
+from core.jobs.liveness import LivenessStatus, probe_liveness
 from core.jobs.operations.campaign import register_campaign_operations
 from core.jobs.repository import JobRepository
 from core.memory import EntityNotFound, JsonFileMemory
@@ -27,6 +29,24 @@ from core.memory import EntityNotFound, JsonFileMemory
 from ..context import OperationContext
 from ..policies import check_can_execute_job
 from ..result import ErrorCode, OperationError, OperationResult, OperationStatus, OperationWarning
+
+
+class JobRecordView(BaseModel):
+    """``show_job``/``list_jobs`` response shape: the persisted
+    :class:`~core.jobs.models.JobRecord` plus a derived, never-persisted
+    liveness observation (job-execution-robustness). ``liveness`` is
+    computed fresh on every read — it is not, and must never become, a
+    field on ``JobRecord`` itself (that would make ``job.v1`` claim a
+    real-time property no static, persisted contract can honestly hold)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    job: JobRecord
+    liveness: LivenessStatus
+
+
+def _with_liveness(ctx: OperationContext, record: JobRecord) -> JobRecordView:
+    return JobRecordView(job=record, liveness=probe_liveness(ctx.root, record))
 
 # MKT-11D — registered here, not in core/jobs/__init__.py, to avoid a
 # circular import: campaign.run's handler depends on
@@ -131,7 +151,10 @@ def run_job(
 
 def show_job(ctx: OperationContext, *, job_id: str) -> OperationResult:
     """Load one job by id. Read-only — no permission check (mirrors
-    approvals' show/list posture, MKT-11B)."""
+    approvals' show/list posture, MKT-11B). ``data`` is a
+    :class:`JobRecordView` (the record plus a derived, never-persisted
+    ``liveness`` observation — see :mod:`core.jobs.liveness`), not a bare
+    ``JobRecord``, since job-execution-robustness."""
     try:
         record = JobRepository(JsonFileMemory(ctx.root)).get(ctx.client_slug, job_id)
     except EntityNotFound:
@@ -143,7 +166,7 @@ def show_job(ctx: OperationContext, *, job_id: str) -> OperationResult:
         return OperationResult.error_result(
             code=ErrorCode.PERSISTENCE_ERROR, message=str(e),
         )
-    return OperationResult.ok_result(data=record)
+    return OperationResult.ok_result(data=_with_liveness(ctx, record))
 
 
 def list_jobs(
@@ -153,11 +176,12 @@ def list_jobs(
     operation: str | None = None,
     limit: int | None = None,
 ) -> OperationResult:
-    """List jobs for one tenant, newest first. Read-only."""
+    """List jobs for one tenant, newest first. Read-only. ``data`` is a
+    ``list[JobRecordView]`` — see :func:`show_job`."""
     records = JobRepository(JsonFileMemory(ctx.root)).list_for_client(
         ctx.client_slug, state=state, operation=operation, limit=limit,
     )
-    return OperationResult.ok_result(data=records)
+    return OperationResult.ok_result(data=[_with_liveness(ctx, r) for r in records])
 
 
 def cancel_job(

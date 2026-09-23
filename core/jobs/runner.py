@@ -47,6 +47,14 @@ _ACTOR = "job_runner"
 _LOCKS_DIRNAME = "_locks"
 
 
+def job_lock_path(root: Path, client_slug: str, job_id: str) -> Path:
+    """The execution-lock path for one job. A free function (not a method)
+    so :mod:`core.jobs.liveness` can build the identical path for a
+    read-only probe without needing a live :class:`InlineJobRunner`
+    instance — same single source of truth either way."""
+    return root / client_slug / _LOCKS_DIRNAME / f"job_{job_id}.lock"
+
+
 class JobTransitionError(RuntimeError):
     """Raised when a caller asks the runner to advance a job past a
     transition the state machine forbids, OR when a concurrent ``run()``
@@ -66,9 +74,7 @@ class InlineJobRunner:
         self._registry = registry or default_registry
 
     def _job_lock(self, client_slug: str, job_id: str) -> FileLock:
-        return FileLock(
-            self._root / client_slug / _LOCKS_DIRNAME / f"job_{job_id}.lock"
-        )
+        return FileLock(job_lock_path(self._root, client_slug, job_id))
 
     # ---------- submit ----------
 
@@ -137,6 +143,12 @@ class InlineJobRunner:
 
             self._transition(record, JobState.RUNNING, action="started")
             record.started_at = utcnow()
+            # We hold this job's execution lock right now — mark the
+            # record as lock-protected so a later liveness probe (see
+            # core/jobs/liveness.py) can trust "lock is free" as a real
+            # stale-crash signal for it, instead of treating it as an
+            # unknowable legacy RUNNING record.
+            record.lock_protected = True
             self._repo.save(record)
 
             try:
