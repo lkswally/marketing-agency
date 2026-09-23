@@ -1578,7 +1578,7 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 
 ---
 
-## From MKT-9B (Alpha Pilot 1 findings — LEXIA)  ✅ RESOLVED
+## From MKT-9B (Alpha Pilot 1 findings — LEGALCASE DEMO)  ✅ RESOLVED
 
 - **Introduced:** MKT-9B
 - **Resolved at:** MKT-9B (same block) — fixed `portal/pack_registry.py` kind
@@ -1592,8 +1592,11 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
   competitor names + forbidden words).
 - **Notes:** 14 net-new tests across 4 files. No new features, no new
   external integrations — pure correctness + templated-quality fix triggered
-  by running the pipeline against the real `examples/intake/lexia.json`.
-  `data/lexia/` added to gitignore as the per-pilot working directory
+  by running the pipeline against a real-business-shaped intake (later
+  replaced with the synthetic `examples/intake/legalcase-demo.json` fixture
+  for portfolio publication — see git history for the original pilot
+  reference this section describes).
+  `data/legalcase-demo/` added to gitignore as the per-pilot working directory
   (superseded by the broader `data/*` pattern from MKT-10A).
 
 ## From MKT-9C (legal domain templated outputs)  ✅ RESOLVED
@@ -1602,7 +1605,8 @@ Still open from MKT-4C: P-4C.6 (stale RefusingClaudeInvoker message), P-4C.8 (bu
 - **Resolved at:** MKT-9C (same block) — added domain-aware extraction
   helpers to `core/strategy/templates.py` (`_extract_product_features`,
   `_detect_anti_pattern_tools`, `_extract_pains_from_intake`,
-  `_sanitize_forbidden`) so a real-business intake (LEXIA) produces
+  `_sanitize_forbidden`) so a real-business-shaped intake (later anonymized
+  as the LEGALCASE DEMO synthetic fixture) produces
   domain-specific pain points, headlines, keyword clusters, social copy and
   reels voiceover instead of generic SaaS boilerplate.
 - **Notes:** 16 new tests in `tests/strategy/test_mkt9c_legal_domain_outputs.py`.

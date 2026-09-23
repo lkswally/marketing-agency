@@ -5,7 +5,7 @@ description = "Modular, agent-based marketing OS. Standalone, optionally bridgea
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-authors = [{ name = "Lucas Rojo", email = "lksrojo86@gmail.com" }]
+authors = [{ name = "Lucas Rojo" }]
 
 # Runtime dependencies are added per block.
 # MKT-1B: pydantic for domain models.

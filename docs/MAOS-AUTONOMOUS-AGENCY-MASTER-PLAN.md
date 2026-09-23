@@ -755,7 +755,7 @@ Scale (deliberately not percentages): **NONE** · **SPEC** (documented only) ·
 
 | Question | Verdict |
 |---|---|
-| **Supervised pilot** (operator drives CLI, one real client) | **Ready now** — this is exactly what MKT-9B/9C/9D validated with LEXIA. |
+| **Supervised pilot** (operator drives CLI, one real client) | **Ready now** — this is exactly what MKT-9B/9C/9D validated against a real-business-shaped intake (anonymized as the LEGALCASE DEMO synthetic fixture for publication). |
 | **Internal use** (team, shared) | **Not ready** — no auth, no concurrency, no web. ~2 milestones. |
 | **Real client-facing** | **Not ready** — no web, no approval history, connectors unproven. ~5–6 milestones. |
 | **Partial autonomy** (AUTO-2/3) | **Not ready** — no jobs, no policies, no execution adapters. ~8 milestones. |

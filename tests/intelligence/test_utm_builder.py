@@ -339,8 +339,8 @@ class TestUTMPlanCLI:
         from cli.main import main
 
         mem = _make_memory(tmp_path)
-        report = _strategy_report_fixture("lexia")
-        mem.put("lexia", REPORT_KIND, STRATEGY_SINGLETON, report)
+        report = _strategy_report_fixture("legalcase-demo")
+        mem.put("legalcase-demo", REPORT_KIND, STRATEGY_SINGLETON, report)
 
         root = str(tmp_path / "mem")
         outputs = str(tmp_path / "outputs")
@@ -349,10 +349,10 @@ class TestUTMPlanCLI:
         rc = main(
             [
                 "utm-plan",
-                "--client", "lexia",
+                "--client", "legalcase-demo",
                 "--root", root,
                 "--outputs-dir", outputs,
-                "--base-url", "https://lexia.com",
+                "--base-url", "https://legalcase-demo.example",
                 "--period", "2024-06",
             ],
             out=buf,

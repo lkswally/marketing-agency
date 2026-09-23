@@ -93,7 +93,7 @@ Returns JSON summary to stdout. Exit 0 always (fallback plan is valid).
 - Market intelligence contracts established; future real connectors drop in
   without breaking the pipeline.
 - UTM plan generation is immediately usable against real client data
-  (e.g. `mkt utm-plan --client lexia`).
+  (e.g. `mkt utm-plan --client legalcase-demo`).
 - Dry-run-first means no credentials, no network, no ToS issues in CI.
 - All new tests pass without mocks for network calls.
 
