@@ -2,10 +2,10 @@
 
 A deterministic, audit-first backend for running a marketing agency's
 operational workflow — intake, strategy, compliance review, creative
-drafting, and campaign execution — through a CLI and job system, with
-every state change persisted and every decision traceable. Optional
-LLM-assisted content generation, gated by human approval before anything
-ships.
+drafting, and campaign execution — through a CLI and job system. State
+changes are persisted, and most (not all — see Execution Model) also
+emit a hash-chained audit event. Optional LLM-assisted content
+generation, gated by human approval before anything ships.
 
 **REAL EXECUTABLE AGENTS: 0 · SPEC-ONLY AGENTS: 16 · MAX VERIFIED DELEGATION DEPTH: 0**
 This is deterministic orchestration with approval-gated execution and
@@ -38,7 +38,7 @@ queryable record instead of a Slack message or a comment in a Google Doc.
 
 | Capability | Status | Evidence |
 |---|---|---|
-| CLI (31 commands) as the only entry point | LIVE | `cli/main.py`; every command exit-code tested |
+| CLI (31 commands) as the primary operational entry point | LIVE | `cli/main.py`; every command exit-code tested. The Streamlit portal (below) is a separate, read-only interface, not a second way to operate the system. |
 | Job execution (`QUEUED → RUNNING → {COMPLETED, FAILED, WAITING_APPROVAL, CANCELLED}`) | LIVE | `core/jobs/`, 88 tests |
 | Versioned approvals (multiple per client, immutable history) | LIVE | `core/approval/`, 129 tests |
 | Deterministic campaign pipeline (intake → strategy → approval → creative → visual) | LIVE | `core/pipeline/orchestrator.py` |
@@ -60,15 +60,16 @@ queryable record instead of a Slack message or a comment in a Google Doc.
 flowchart TD
     CLI["CLI (mkt, 31 commands)"]
     Portal["Portal (Streamlit, read-only)"]
-    AppSvc["Application Services\n(OperationContext / OperationResult, role checks)"]
+    AppSvc["Application Services\n(OperationContext / OperationResult, role checks) —\nused by ~9 of 31 commands: jobs, approvals, seo-report,\ncampaign_run backend resolution"]
     Jobs["Job Execution\n(QUEUED -> RUNNING -> COMPLETED/FAILED/WAITING_APPROVAL/CANCELLED)"]
     Approvals["Versioned Approvals\n(one immutable record per decision)"]
     Pipeline["Campaign Pipeline\n(intake -> strategy -> approval -> creative -> visual)"]
-    Domain["Domain Services\n(claim auditor, creative/visual factories, analytics rules)"]
+    Domain["Domain / core.* Services\n(claim auditor, creative/visual factories, analytics rules,\nnotion/n8n/image-provider/intelligence adapters)"]
     Memory["Persistent Client State\n(JsonFileMemory, one file per entity, per client)"]
     Audit["Hash-Chained Audit Trail"]
 
     CLI --> AppSvc
+    CLI -->|"~22 of 31 commands\n(build-creatives, notion-sync, ads-*, etc.)"| Domain
     Portal -->|reads only| Memory
     AppSvc --> Jobs
     AppSvc --> Approvals
@@ -83,24 +84,43 @@ flowchart TD
     Pipeline --> Audit
 ```
 
-This diagram reflects the real call graph, not an aspiration: there is
-no component that decides which other component to invoke at runtime —
-every arrow is a fixed, deterministic call.
+This diagram reflects the real call graph, not an aspiration — including
+the part that isn't fully layered yet: about 9 of the 31 CLI commands
+(jobs, approvals, seo-report, and campaign_run's backend resolution) go
+through `core/application/services/`; the rest call `core.*` domain
+modules directly from `cli/main.py`. No component decides which other
+component to invoke at runtime — every arrow, on either path, is a fixed
+call, not a dynamic routing decision.
 
 ## Execution Model
 
 ```
 CLI / Portal (adapters)
-    -> Application Services (OperationContext in, OperationResult out — the
-       only path to a client_slug, so cross-tenant writes are structurally
-       impossible, not just discouraged)
+    -> for jobs / approvals / seo-report / campaign-run backend resolution:
+       Application Services (OperationContext in, OperationResult out)
         -> Jobs / Approvals / Pipeline (state machines + a fixed six-stage
            pipeline — no dynamic branching beyond one policy gate)
             -> Domain Services (claim auditor, creative/visual factories,
                deterministic analytics rules — no side effects of their own)
                 -> Persistent Client State (JsonFileMemory) + Audit Trail
                    (append-only, hash-chained)
+
+    -> for the remaining ~22 commands (build-creatives, notion-sync,
+       n8n-plan, ads-*, image-*, atlas-brief, intake, utm-plan, ...):
+       CLI calls the relevant core.* module directly, bypassing the
+       application-service layer
 ```
+
+`client_slug` validation (`validate_slug`) is enforced at the
+`JsonFileMemory` layer itself, not only inside `OperationContext` — so
+tenant-slug format validation holds on both paths above, even though the
+`OperationContext`/`OperationResult` contract itself does not.
+
+Audit-event emission is broad but not universal: most `core.*` modules
+called directly by the CLI (creative, visual, Notion, n8n, image jobs,
+image-provider-plan, ATLAS bridge, ads-analysis, feedback, iteration,
+SEO intelligence) emit their own audit event on persist — `core/execution/task_factory.py`
+(`build-tasks`) is a confirmed exception that does not.
 
 Every application service returns a structured `OperationResult` with a
 stable `ErrorCode` vocabulary — the same contract the CLI and the (future)
@@ -234,8 +254,11 @@ All checks passed!
   `ruff check .`, and the portal all passed natively. (No IPs, hostnames,
   or infrastructure details are recorded anywhere in this repo.)
 - Client state (`data/clients/`) and generated outputs (`outputs/`) are
-  the only stateful directories — both are local JSON/Markdown files,
-  gitignored except for structural placeholders.
+  the two actively-used stateful directories — local JSON/Markdown files,
+  gitignored except for structural placeholders. `assets/clients/` is a
+  third, reserved stateful directory in the same taxonomy — gitignored
+  and provisioned the same way, but no code writes real files there yet
+  (no runtime path resolves it; see Current Limitations).
 
 ## Engineering Decisions
 
@@ -243,9 +266,12 @@ All checks passed!
   system runs today is a fixed function, not a model deciding what to do
   next — autonomy is opt-in per stage (currently: strategy generation
   only) and always has a deterministic fallback.
-- **A single application-service boundary.** CLI and any future adapter
-  (API, portal writes) go through the same `OperationContext` /
-  `OperationResult` contract — no adapter-specific business logic.
+- **An emerging application-service boundary**, not a completed one.
+  Jobs, approvals, analytics, campaign execution, and SEO already go
+  through the shared `OperationContext` / `OperationResult` contract;
+  several legacy CLI commands still call `core.*` modules directly.
+  Any future adapter (API, portal writes) should extend the existing
+  boundary rather than add a second one.
 - **Versioned, immutable approvals.** Approval history was originally a
   single-record-per-client design; it was deliberately migrated to a
   versioned model so a new pipeline run can never silently invalidate a
@@ -277,7 +303,14 @@ This section is deliberately explicit:
 - **No agent execution engine.** `agents/`, `skills/`, and `workflows/`
   are specifications only. There is no orchestration engine that reads
   one of these specs and executes it as an autonomous agent.
-- **No HTTP/API layer.** The CLI is the only supported entry point today.
+- **No HTTP/API layer.** The CLI is the only supported way to *operate*
+  the system today; the portal is read-only.
+- **`assets/clients/` is reserved but unwired.** The directory is
+  provisioned (gitignored, taxonomy documented in `ARCHITECTURE.md`),
+  but no runtime code resolves or writes to it — there is no
+  `--assets-dir` flag anywhere in the CLI.
+- **The application-service boundary is partial**, not complete — see
+  Execution Model above for which commands use it and which don't.
 - **No automatic retry or resume.** Failures and approval-pauses both
   require a human/operator action to proceed.
 - **No real-time or async job execution.** `InlineJobRunner` is
@@ -340,10 +373,13 @@ mkt --help
 mkt list-workflows
 mkt validate-specs
 
-mkt intake --file examples/intake/demo-business.json --client demo-saas --root data/clients
+mkt intake --file examples/intake/demo-business.json --root data/clients --outputs-dir outputs
+# client_slug is derived from the intake, not passed in — this fixture
+# resolves to "acme-bootstrapped" (verified by running it)
+
 mkt run-campaign --intake examples/intake/demo-business.json --root data/clients --outputs-dir outputs
 mkt approvals list --root data/clients
-mkt approve --client demo-saas --root data/clients --actor lucas
+mkt approve --client acme-bootstrapped --root data/clients --actor lucas
 ```
 
 ```bash
