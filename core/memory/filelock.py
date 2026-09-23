@@ -76,14 +76,38 @@ class LockInfrastructureError(RuntimeError):
 def _ensure_lockable_region(fd: int) -> None:
     """Make sure the file has at least one byte, so locking a 1-byte
     region starting at offset 0 is well-defined on every platform this
-    module supports. Idempotent and safe if called concurrently by
-    multiple racing openers — worst case, the same single null byte is
-    written more than once."""
-    size = os.fstat(fd).st_size
-    if size < _LOCK_REGION_SIZE:
-        os.lseek(fd, 0, os.SEEK_SET)
-        os.write(fd, b"\0" * _LOCK_REGION_SIZE)
-    os.lseek(fd, 0, os.SEEK_SET)
+    module supports.
+
+    Multiple racing first-time openers of a brand-new (empty) lock file
+    is a real scenario (several callers all trying to acquire the same
+    job's lock for the first time) — and on Windows, two independent file
+    handles writing to the same fresh file at the same moment can raise a
+    transient ``PermissionError`` even though the write itself is
+    idempotent (every racer writes the exact same single null byte).
+    Observed directly in this project's own concurrency tests, not
+    assumed: retry a few times with a short backoff, re-checking size
+    each time — if another racer's write already satisfied the size
+    requirement, this returns immediately without writing anything.
+    Only after real, repeated failure does this propagate (wrapped by
+    the caller into :class:`LockInfrastructureError` — fails closed, the
+    caller never mistakes this for a successful acquisition)."""
+    last_error: OSError | None = None
+    for attempt in range(5):
+        size = os.fstat(fd).st_size
+        if size >= _LOCK_REGION_SIZE:
+            os.lseek(fd, 0, os.SEEK_SET)
+            return
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, b"\0" * _LOCK_REGION_SIZE)
+            os.lseek(fd, 0, os.SEEK_SET)
+            return
+        except OSError as e:
+            last_error = e
+            if attempt < 4:
+                time.sleep(0.01 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 def _try_lock_fd(fd: int) -> bool:

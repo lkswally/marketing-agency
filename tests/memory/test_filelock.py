@@ -181,6 +181,49 @@ def test_acquire_raises_lock_timeout_error_not_a_hang(tmp_path: Path) -> None:
         holder.release()
 
 
+# ---------- many racing FIRST-TIME openers of a brand-new lock file ----------
+
+
+def test_many_threads_racing_first_acquire_of_a_fresh_lock_file(tmp_path: Path) -> None:
+    """Regression test for a real bug found via tests/jobs/test_execution_concurrency.py:
+    several threads all opening the SAME brand-new (zero-byte) lock file
+    for the first time simultaneously — each with its own fd — could
+    transiently raise PermissionError while preparing the 1-byte
+    lockable region on Windows, before _ensure_lockable_region grew a
+    retry. Exactly one must win try_acquire(); nobody may raise."""
+    lock_path = tmp_path / "brand_new.lock"
+    n = 12
+    results: list[bool] = []
+    errors: list[str] = []
+    result_lock = threading.Lock()
+
+    def attempt() -> None:
+        try:
+            lock = FileLock(lock_path)
+            ok = lock.try_acquire()
+            with result_lock:
+                results.append(ok)
+            if ok:
+                time.sleep(0.05)
+                lock.release()
+        except Exception as e:  # noqa: BLE001 — a test failure, not swallowed
+            with result_lock:
+                errors.append(f"{type(e).__name__}: {e}")
+
+    threads = [threading.Thread(target=attempt) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert errors == [], f"unexpected errors from concurrent first-time acquire: {errors}"
+    assert results.count(True) == 1, (
+        f"expected exactly 1 winner among {n} racing first-time acquirers, "
+        f"got {results.count(True)}: {results}"
+    )
+    assert results.count(False) == n - 1
+
+
 def test_acquire_succeeds_once_lock_is_released_before_deadline(tmp_path: Path) -> None:
     lock_path = tmp_path / "job_release_race.lock"
     holder = FileLock(lock_path)
