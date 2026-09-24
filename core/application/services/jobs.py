@@ -16,6 +16,7 @@ from core.jobs import (
     JobPersistenceError,
     JobRecord,
     JobRegistry,
+    JobStartError,
     JobState,
     JobTransitionError,
     UnknownOperationError,
@@ -122,6 +123,15 @@ def run_job(
     except JobTransitionError as e:
         return OperationResult.error_result(
             code=ErrorCode.INVALID_STATE_TRANSITION, message=str(e),
+        )
+    except JobStartError as e:
+        # The handler is guaranteed to have NOT run (see
+        # InlineJobRunner._begin_running) — the job is left however it was
+        # durably persisted (QUEUED, or RUNNING+lock_protected, which a
+        # later liveness probe will correctly read as STALE once the
+        # execution lock is released).
+        return OperationResult.error_result(
+            code=ErrorCode.PERSISTENCE_ERROR, message=str(e),
         )
 
     if was_completed:

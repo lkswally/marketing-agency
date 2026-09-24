@@ -62,6 +62,14 @@ class JobTransitionError(RuntimeError):
     ``ErrorCode.INVALID_STATE_TRANSITION`` — never let it propagate raw."""
 
 
+class JobStartError(RuntimeError):
+    """Raised when ``run()`` cannot durably record that a job has started
+    (persisting ``RUNNING``/``started_at``/``lock_protected``, or writing
+    the "started" audit event) — see ``_begin_running`` for the invariant
+    this enforces. The handler is guaranteed to have NOT run whenever this
+    is raised; fail closed, never silently proceed."""
+
+
 class InlineJobRunner:
     """Submits and executes jobs synchronously on the calling thread."""
 
@@ -141,15 +149,13 @@ class InlineJobRunner:
                     "— only QUEUED jobs can be run"
                 )
 
-            self._transition(record, JobState.RUNNING, action="started")
-            record.started_at = utcnow()
-            # We hold this job's execution lock right now — mark the
-            # record as lock-protected so a later liveness probe (see
-            # core/jobs/liveness.py) can trust "lock is free" as a real
-            # stale-crash signal for it, instead of treating it as an
-            # unknowable legacy RUNNING record.
-            record.lock_protected = True
-            self._repo.save(record)
+            # Invariant (job-execution-robustness, GAP 2): the handler MUST
+            # NEVER run unless RUNNING + lock_protected have already been
+            # durably persisted, AND the "started" audit event has already
+            # been durably written. See _begin_running's docstring for the
+            # full ordering justification. Any failure here raises
+            # JobStartError and the handler is never reached.
+            self._begin_running(record)
 
             try:
                 spec = self._registry.resolve(record.operation)
@@ -251,6 +257,98 @@ class InlineJobRunner:
         self._repo.save(record)
         return record
 
+    def _begin_running(self, record: JobRecord) -> None:
+        """Transition a QUEUED record to RUNNING with the durability
+        ordering the handler's execution depends on (job-execution-
+        robustness, GAP 2 follow-up).
+
+        ORDERING CHOSEN, AND WHY:
+          1. Mutate the record in memory: state=RUNNING, started_at=now,
+             lock_protected=True.
+          2. Persist it (``self._repo.save``) — a single atomic file write
+             (see ``core/memory/json_file.py::_atomic_write``: temp file +
+             fsync + ``os.replace``). Either the whole write lands, or the
+             on-disk record is untouched — there is no partial/torn state
+             to worry about here.
+          3. Only once that persist has actually returned, write the
+             "started" audit event.
+          4. Only once THAT has actually returned does ``run()`` go on to
+             resolve and invoke the handler.
+
+          This is deliberately NOT a distributed transaction across the
+          JobRecord store and the audit trail — there is no rollback and
+          no compensation if step 3 fails after step 2 succeeded. What it
+          IS: a single, explicit, justified ordering invariant — "RUNNING
+          is durable before the audit event is attempted, and the audit
+          event is durable before the handler runs" — enforced by simply
+          never catching a failure at either step and continuing anyway.
+          Any exception from step 2 or step 3 propagates as
+          :class:`JobStartError`, and the handler is never reached.
+
+        FAULT SCENARIOS AND WHY EACH FAILS CLOSED:
+          (a) The ``save(RUNNING)`` write itself fails (step 2 raises).
+              Because the write is atomic, the on-disk record is still
+              whatever it was before this call — normally QUEUED,
+              untouched. The lock is released in ``run()``'s ``finally``.
+              The job is exactly as re-runnable as it was before this
+              call ever started; the handler never ran.
+          (b) The "started" audit write fails (step 3 raises) after (2)
+              already succeeded. The on-disk record now says RUNNING,
+              started_at set, lock_protected=True — but the audit chain
+              has no matching "started" event. This is NOT silently
+              tolerated: the exception propagates, the handler never
+              runs, and the lock is released. The job now looks exactly
+              like a legacy-incompatible crash to a later liveness probe
+              (see ``core/jobs/liveness.py``): RUNNING + lock_protected
+              + lock free == STALE. That is the correct, honest read —
+              an operator (or an automated retry policy, out of scope
+              here) can act on it. No new persisted job state was
+              invented to represent this.
+          (c) The process dies between (2) and (3) (e.g. killed, crashed,
+              powered off). Same observable outcome as (b): RUNNING is
+              durable, the audit event never was, the OS releases the
+              lock automatically on process exit (see
+              ``core/memory/filelock.py``), and the handler never ran
+              because the thread that would have called it no longer
+              exists. Liveness reports STALE identically to (b) — the
+              mechanism does not need to distinguish "audit write threw"
+              from "process died mid-write"; both produce the same
+              durable, honestly-labelled state.
+        """
+        if not can_transition(record.state, JobState.RUNNING):
+            raise JobTransitionError(
+                f"illegal transition for job {record.job_id!r}: "
+                f"{record.state.value!r} -> {JobState.RUNNING.value!r}"
+            )
+        from_state = record.state
+        record.state = JobState.RUNNING
+        record.started_at = utcnow()
+        # We hold this job's execution lock right now — mark the record as
+        # lock-protected so a later liveness probe (core/jobs/liveness.py)
+        # can trust "lock is free" as a real stale-crash signal for it,
+        # instead of treating it as an unknowable legacy RUNNING record.
+        record.lock_protected = True
+
+        try:
+            self._repo.save(record)
+        except Exception as e:  # noqa: BLE001 — re-raised as a controlled type
+            raise JobStartError(
+                f"failed to persist RUNNING state for job {record.job_id!r} "
+                f"before execution — handler will NOT run: "
+                f"{type(e).__name__}: {e}"
+            ) from e
+
+        try:
+            self._audit(record, action="started", from_state=from_state)
+        except Exception as e:  # noqa: BLE001 — re-raised as a controlled type
+            raise JobStartError(
+                f"RUNNING was persisted for job {record.job_id!r} but the "
+                f"'started' audit event failed to write — handler will NOT "
+                f"run. The persisted record is now indistinguishable from "
+                f"a crash and will read as STALE once the execution lock "
+                f"is released: {type(e).__name__}: {e}"
+            ) from e
+
     def _transition(self, record: JobRecord, target: JobState, *, action: str) -> None:
         if not can_transition(record.state, target):
             raise JobTransitionError(
@@ -297,5 +395,6 @@ __all__ = [
     "EntityNotFound",
     "InlineJobRunner",
     "JobPersistenceError",
+    "JobStartError",
     "JobTransitionError",
 ]

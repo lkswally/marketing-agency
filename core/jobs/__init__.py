@@ -37,7 +37,7 @@ from .registry import (
     default_registry,
 )
 from .repository import JobPersistenceError, JobRepository, sanitize_params
-from .runner import InlineJobRunner, JobTransitionError
+from .runner import InlineJobRunner, JobStartError, JobTransitionError
 
 # The default registry always knows the demo operations — they only
 # depend on core.application.context/result (leaf modules), so
@@ -68,6 +68,7 @@ __all__ = [
     "JobRepository",
     "JobRiskClass",
     "JobState",
+    "JobStartError",
     "JobTransitionError",
     "OperationSpec",
     "UnknownOperationError",
