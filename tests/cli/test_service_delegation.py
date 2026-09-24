@@ -211,3 +211,128 @@ def test_intake_calls_through_the_service(tmp_path: Path) -> None:
     payload = json.loads(text)
     assert payload["client_slug"] == "acme-stub"
     assert not (tmp_path / "mem").exists()
+
+
+# ---------- batch 2: import-metrics / analyze-metrics / analytics-fetch ----------
+
+class _Fake:
+    """Generic attribute bag for stubbed domain objects — avoids
+    pulling in real Pydantic models (and their validation) just to
+    prove the CLI never falls back to constructing them itself."""
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def test_import_metrics_calls_through_the_service(tmp_path: Path) -> None:
+    fake_report = _Fake(
+        import_id="fake-import-id",
+        client_slug="acme",
+        source=_Enumish("ga4"),
+        file_path="whatever.csv",
+        rows_imported=3,
+        rows_rejected=0,
+        period_start=None,
+        period_end=None,
+        period_label=None,
+        period_snapshot_entity_id=None,
+    )
+    fake_snapshot = _Fake(snapshot_id="fake-snapshot-id", total_rows=3)
+    stub_result = OperationResult.ok_result(
+        data={"report": fake_report, "snapshot": fake_snapshot}, artifacts=[],
+    )
+
+    metrics_file = tmp_path / "metrics.csv"
+    metrics_file.write_text("date,channel,sessions\n2026-01-01,organic,10\n", encoding="utf-8")
+
+    with patch(
+        "core.application.services.metrics.import_metrics", return_value=stub_result,
+    ) as mock_service:
+        code, text = _run(
+            [
+                "import-metrics",
+                "--client", "acme",
+                "--file", str(metrics_file),
+                "--source", "ga4",
+                "--root", str(tmp_path / "mem"),
+                "--outputs-dir", str(tmp_path / "out"),
+            ]
+        )
+    assert code == 0
+    mock_service.assert_called_once()
+    payload = json.loads(text)
+    assert payload["import_id"] == "fake-import-id"
+    assert not (tmp_path / "mem").exists()
+
+
+def test_analyze_metrics_calls_through_the_service(tmp_path: Path) -> None:
+    fake_pack = _Fake(
+        pack_id="fake-analysis-pack-id",
+        client_slug="acme",
+        contract_version="fake.v1",
+        snapshot_id="fake-snapshot-id",
+        total_rows_analyzed=3,
+        best_channel="organic",
+        worst_channel="email",
+        channels=[],
+        seo_opportunities=_Fake(opportunities=[]),
+        recommendations=[],
+    )
+    stub_result = OperationResult.ok_result(data=fake_pack, artifacts=[])
+
+    with patch(
+        "core.application.services.metrics.analyze_metrics", return_value=stub_result,
+    ) as mock_service:
+        code, text = _run(
+            [
+                "analyze-metrics",
+                "--client", "acme",
+                "--root", str(tmp_path / "mem"),
+                "--outputs-dir", str(tmp_path / "out"),
+            ]
+        )
+    assert code == 0
+    mock_service.assert_called_once()
+    payload = json.loads(text)
+    assert payload["pack_id"] == "fake-analysis-pack-id"
+    assert not (tmp_path / "mem").exists()
+
+
+def test_analytics_fetch_calls_through_the_service(tmp_path: Path) -> None:
+    fake_report = _Fake(
+        report_id="fake-fetch-report-id",
+        client_slug="acme",
+        contract_version="fake.v1",
+        source="ga4",
+        status=_Enumish("skipped"),
+        rows_fetched=0,
+        rows_normalized=0,
+        rows_rejected=0,
+        snapshot_id=None,
+        sdk_available=False,
+        credentials_available=False,
+        dry_run=True,
+        lookback_days=28,
+        identifier_fingerprint=None,
+        reason="dry-run flag set",
+    )
+    stub_result = OperationResult.ok_result(data=fake_report, artifacts=[])
+
+    with patch(
+        "core.application.services.analytics_fetch.fetch_analytics", return_value=stub_result,
+    ) as mock_service:
+        code, text = _run(
+            [
+                "analytics-fetch",
+                "--client", "acme",
+                "--source", "ga4",
+                "--dry-run",
+                "--root", str(tmp_path / "mem"),
+                "--outputs-dir", str(tmp_path / "out"),
+            ]
+        )
+    assert code == 0
+    mock_service.assert_called_once()
+    payload = json.loads(text)
+    assert payload["report_id"] == "fake-fetch-report-id"
+    assert not (tmp_path / "mem").exists()

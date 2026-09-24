@@ -26,10 +26,15 @@ CLI_MAIN = Path(__file__).resolve().parents[2] / "cli" / "main.py"
 # import from `core.application.services.*` (informational only, not
 # enforced beyond "core.application.*" generally being allowed below).
 _MIGRATED_FUNCTIONS = {
+    # batch 1
     "_cmd_build_creatives",
     "_cmd_build_visuals",
     "_cmd_build_tasks",
     "_cmd_intake",
+    # batch 2
+    "_cmd_import_metrics",
+    "_cmd_analyze_metrics",
+    "_cmd_analytics_fetch",
 }
 
 # A migrated function may still import these — they are adapter-only
