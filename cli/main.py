@@ -1101,30 +1101,27 @@ def _cmd_ads_analyze(args: argparse.Namespace, *, out) -> int:
     Exit codes:
     - 0 on success.
     - 2 when there is no ``MetricsSnapshot`` for the client.
+
+    architecture/application-service-boundary (batch 3): thin adapter
+    over :func:`core.application.services.ads.analyze_ads`.
     """
-
-    from core.ads_analysis import (
-        GoogleAdsAnalyzer,
-        render_markdown_ads_insights,
-    )
-    from core.memory import JsonFileMemory
-
-    memory = JsonFileMemory(Path(args.root))
-    analyzer = GoogleAdsAnalyzer(memory=memory)
-    try:
-        pack = analyzer.analyze(args.client)
-    except ValueError as e:
-        print(f"error: {e}", file=out)
-        return 2
-    analyzer.persist(pack)
+    from core.application import OperationContext
+    from core.application.services.ads import analyze_ads
 
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path = outputs_dir / "google-ads-insight-pack.md"
-    md_path.write_text(render_markdown_ads_insights(pack), encoding="utf-8")
-    json_path = outputs_dir / "google-ads-insight-pack.json"
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = analyze_ads(ctx)
 
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    md_path = outputs_dir / "google-ads-insight-pack.md"
+    json_path = outputs_dir / "google-ads-insight-pack.json"
     payload = {
         "pack_id": pack.pack_id,
         "client_slug": pack.client_slug,
@@ -1641,30 +1638,27 @@ def _cmd_ads_feedback(args: argparse.Namespace, *, out) -> int:
     Exit codes:
     - 0 on success.
     - 2 when there is no ``GoogleAdsInsightPack`` for the client.
+
+    architecture/application-service-boundary (batch 3): thin adapter
+    over :func:`core.application.services.ads.build_ads_feedback`.
     """
-
-    from core.ads_feedback import (
-        AdsFeedbackBridge,
-        render_markdown_ads_bridge,
-    )
-    from core.memory import JsonFileMemory
-
-    memory = JsonFileMemory(Path(args.root))
-    bridge = AdsFeedbackBridge(memory=memory)
-    try:
-        pack = bridge.build(args.client)
-    except ValueError as e:
-        print(f"error: {e}", file=out)
-        return 2
-    bridge.persist(pack)
+    from core.application import OperationContext
+    from core.application.services.ads import build_ads_feedback
 
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path = outputs_dir / "ads-feedback-bridge-pack.md"
-    md_path.write_text(render_markdown_ads_bridge(pack), encoding="utf-8")
-    json_path = outputs_dir / "ads-feedback-bridge-pack.json"
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = build_ads_feedback(ctx)
 
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    md_path = outputs_dir / "ads-feedback-bridge-pack.md"
+    json_path = outputs_dir / "ads-feedback-bridge-pack.json"
     payload = {
         "pack_id": pack.pack_id,
         "client_slug": pack.client_slug,
