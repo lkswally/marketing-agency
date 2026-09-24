@@ -185,33 +185,34 @@ class ImageJobFactory:
             SINGLETON_ID,
             pack.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="image_job_factory",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "image_generation_job_pack": {
-                    "action": "built",
-                    "pack_id": pack.pack_id,
-                    "visual_pack_id": pack.visual_pack_id,
-                    "creative_pack_id": pack.creative_pack_id,
-                    "approval_pack_id": pack.approval_pack_id,
-                    "total_jobs": pack.stats.total_jobs,
-                    "blocks_publish": pack.blocks_publish,
-                    "blocked_due_to_approval": (
-                        pack.stats.blocked_due_to_approval
-                    ),
-                    "blocked_due_to_direction": (
-                        pack.stats.blocked_due_to_direction
-                    ),
-                    "rule_set_id": pack.rule_set_id,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="image_job_factory",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "image_generation_job_pack": {
+                        "action": "built",
+                        "pack_id": pack.pack_id,
+                        "visual_pack_id": pack.visual_pack_id,
+                        "creative_pack_id": pack.creative_pack_id,
+                        "approval_pack_id": pack.approval_pack_id,
+                        "total_jobs": pack.stats.total_jobs,
+                        "blocks_publish": pack.blocks_publish,
+                        "blocked_due_to_approval": (
+                            pack.stats.blocked_due_to_approval
+                        ),
+                        "blocked_due_to_direction": (
+                            pack.stats.blocked_due_to_direction
+                        ),
+                        "rule_set_id": pack.rule_set_id,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     # --- internals ---
 

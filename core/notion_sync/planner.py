@@ -154,27 +154,28 @@ class NotionSyncPlanner:
             plan.model_dump(mode="json"),
         )
         # Audit event so a re-build is observable.
-        prev = self._memory.last_audit_hash(plan.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="notion_sync_planner",
-            occurred_at=utcnow(),
-            client_slug=plan.client_slug,
-            payload={
-                "notion_sync_plan": {
-                    "plan_id": plan.plan_id,
-                    "task_pack_id": plan.task_pack_id,
-                    "would_create": plan.stats.would_create,
-                    "skip_blocked": plan.stats.skip_blocked,
-                    "skip_invalid": plan.stats.skip_invalid,
-                    "issues_error": plan.stats.issues_error,
-                    "blocks_publish": plan.blocks_publish,
-                    "action": "planned",
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            plan.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="notion_sync_planner",
+                occurred_at=utcnow(),
+                client_slug=plan.client_slug,
+                payload={
+                    "notion_sync_plan": {
+                        "plan_id": plan.plan_id,
+                        "task_pack_id": plan.task_pack_id,
+                        "would_create": plan.stats.would_create,
+                        "skip_blocked": plan.stats.skip_blocked,
+                        "skip_invalid": plan.stats.skip_invalid,
+                        "issues_error": plan.stats.issues_error,
+                        "blocks_publish": plan.blocks_publish,
+                        "action": "planned",
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     def load_latest(self, client_slug: str) -> NotionSyncPlan:
         raw = self._memory.get(client_slug, NOTION_SYNC_PLAN_KIND, SINGLETON_ID)

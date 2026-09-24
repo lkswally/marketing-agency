@@ -15,12 +15,14 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.application.context import OperationContext
+from core.approval.approval_pack import ApprovalPackBuilder
 from core.contracts import AuditEventType, AuditTrailEvent, verify_chain
 from core.jobs.models import JobOutcome
 from core.jobs.registry import JobRegistry, JobRiskClass, OperationSpec
 from core.jobs.runner import InlineJobRunner
 from core.memory import JsonFileMemory
 from core.memory.filelock import FileLock
+from core.pipeline.orchestrator import PipelineOrchestrator
 
 
 class _EchoParams(BaseModel):
@@ -117,6 +119,128 @@ def test_two_different_jobs_same_client_concurrent_audit_writes_are_intact(
     # disk — proves the tail file itself wasn't left pointing at a stale
     # or wrong value by the race.
     assert mem.last_audit_hash("acme") == events[-1].hash
+
+
+def test_mixed_job_approval_pipeline_writers_same_client_audit_chain_intact(
+    tmp_path: Path,
+) -> None:
+    """GAP 1 (job-execution-robustness follow-up): a job writer, an
+    approval writer, and a pipeline writer — the three real, current
+    productive callers of the audit trail — all writing concurrently to
+    the SAME client's audit chain, all now on append_audit_event_atomic.
+
+    This is the scenario the earlier two-jobs-only test didn't cover:
+    different *kinds* of writer, not just different job ids, racing on
+    the one lock. Verifies exact event count, no loss, unique hashes,
+    an on-disk-contiguous prev_hash chain, verify_chain()==PASS, and
+    tail == last event's hash.
+    """
+    from core.strategy import StrategyPipeline
+
+    root = tmp_path / "mem"
+    mem = JsonFileMemory(root)
+    reg = _registry()
+    runner = InlineJobRunner(mem, root=root, registry=reg)
+
+    demo_brief = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "clients"
+        / "demo-saas"
+        / "brief.json"
+    )
+    report = StrategyPipeline(memory=mem).run_from_path(demo_brief).report
+    client_slug = report.client_slug
+    ctx = OperationContext(client_slug=client_slug, root=root)
+    baseline_count = len(mem.read_audit_events(client_slug))
+
+    n_job_writers = 4
+    n_approval_writers = 4
+    n_pipeline_writers = 4
+
+    jobs = [
+        runner.submit(ctx, operation="test.echo", params={"message": f"m{i}"})
+        for i in range(n_job_writers)
+    ]
+    events_after_submit = mem.read_audit_events(client_slug)
+    assert len(events_after_submit) == baseline_count + n_job_writers
+
+    errors: list[str] = []
+    lock = threading.Lock()
+
+    def record_error(exc: Exception) -> None:
+        with lock:
+            errors.append(f"{type(exc).__name__}: {exc}")
+
+    def job_worker(job_id: str) -> None:
+        try:
+            runner.run(client_slug, job_id)
+        except Exception as e:  # noqa: BLE001 — captured, not swallowed
+            record_error(e)
+
+    def approval_worker(i: int) -> None:
+        try:
+            builder = ApprovalPackBuilder(mem)
+            pack = builder.build_from_report(report)
+            builder.persist(pack)
+        except Exception as e:  # noqa: BLE001
+            record_error(e)
+
+    def pipeline_worker(i: int) -> None:
+        try:
+            orch = PipelineOrchestrator(mem, outputs_root=tmp_path / "outputs")
+            orch._emit_event(  # noqa: SLF001 — exercising the real writer directly
+                client_slug=client_slug,
+                payload={"note": f"pipeline-writer-{i}"},
+            )
+        except Exception as e:  # noqa: BLE001
+            record_error(e)
+
+    threads = (
+        [threading.Thread(target=job_worker, args=(j.job_id,)) for j in jobs]
+        + [threading.Thread(target=approval_worker, args=(i,)) for i in range(n_approval_writers)]
+        + [threading.Thread(target=pipeline_worker, args=(i,)) for i in range(n_pipeline_writers)]
+    )
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+
+    assert errors == [], f"unexpected errors during mixed concurrent writes: {errors}"
+
+    events = mem.read_audit_events(client_slug)
+    # n_job_writers "submitted" (already counted) + 2 per job run
+    # ("started" + "completed") + 1 per approval persist + 1 per
+    # pipeline emit.
+    expected_count = (
+        baseline_count
+        + n_job_writers
+        + (n_job_writers * 2)
+        + n_approval_writers
+        + n_pipeline_writers
+    )
+    assert len(events) == expected_count, (
+        f"expected {expected_count} audit events (no event lost to the "
+        f"mixed-writer race), got {len(events)}"
+    )
+
+    event_ids = [e.event_id for e in events]
+    assert len(set(event_ids)) == len(event_ids), "duplicate event_id found"
+
+    hashes = [e.hash for e in events]
+    assert len(set(hashes)) == len(hashes), "duplicate event hash found"
+
+    for i in range(1, len(events)):
+        assert events[i].prev_hash == events[i - 1].hash, (
+            f"event {i} (event_id={events[i].event_id}) does not chain to "
+            f"the immediately preceding event on disk"
+        )
+    assert events[0].prev_hash is None
+
+    breaks = verify_chain(events)
+    assert breaks == [], f"verify_chain reported breaks at indices: {breaks}"
+
+    assert mem.last_audit_hash(client_slug) == events[-1].hash
 
 
 def test_audit_lock_path_is_separate_from_any_job_lock(tmp_path: Path) -> None:

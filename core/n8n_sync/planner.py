@@ -169,25 +169,26 @@ class N8nPayloadPlanner:
             SINGLETON_ID,
             payload.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(payload.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="n8n_payload_planner",
-            occurred_at=utcnow(),
-            client_slug=payload.client_slug,
-            payload={
-                "n8n_execution_payload": {
-                    "payload_id": payload.payload_id,
-                    "total_actions": payload.stats.total_actions,
-                    "planned": payload.stats.planned,
-                    "blocked": payload.stats.blocked,
-                    "blocks_publish": payload.blocks_publish,
-                    "action": "planned",
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            payload.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="n8n_payload_planner",
+                occurred_at=utcnow(),
+                client_slug=payload.client_slug,
+                payload={
+                    "n8n_execution_payload": {
+                        "payload_id": payload.payload_id,
+                        "total_actions": payload.stats.total_actions,
+                        "planned": payload.stats.planned,
+                        "blocked": payload.stats.blocked,
+                        "blocks_publish": payload.blocks_publish,
+                        "action": "planned",
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     def load_latest(self, client_slug: str) -> N8nExecutionPayload:
         raw = self._memory.get(client_slug, N8N_EXECUTION_PAYLOAD_KIND, SINGLETON_ID)

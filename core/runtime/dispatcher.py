@@ -277,16 +277,17 @@ class MinimalDispatcher:
         occurred_at,
         payload: dict[str, Any],
     ) -> None:
-        prev = self._memory.last_audit_hash(client_slug)
-        event = AuditTrailEvent.build(
-            event_type=event_type,
-            actor=actor,
-            occurred_at=occurred_at,
-            client_slug=client_slug,
-            payload=payload,
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=event_type,
+                actor=actor,
+                occurred_at=occurred_at,
+                client_slug=client_slug,
+                payload=payload,
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
 
 # Exported helper so the CLI can show which kinds are evaluable.

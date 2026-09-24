@@ -146,27 +146,28 @@ class AtlasHandoffFactory:
             SINGLETON_ID,
             payload,
         )
-        prev = self._memory.last_audit_hash(handoff.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="atlas_handoff_factory",
-            occurred_at=utcnow(),
-            client_slug=handoff.client_slug,
-            payload={
-                "atlas_handoff_brief": {
-                    "action": "built",
-                    "handoff_id": handoff.handoff_id,
-                    "kind": handoff.kind.value,
-                    "strategy_report_id": handoff.strategy_report_id,
-                    "creative_pack_id": handoff.creative_pack_id,
-                    "visual_pack_id": handoff.visual_pack_id,
-                    "blocks_publish": handoff.blocks_publish,
-                    "rule_set_id": handoff.rule_set_id,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            handoff.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="atlas_handoff_factory",
+                occurred_at=utcnow(),
+                client_slug=handoff.client_slug,
+                payload={
+                    "atlas_handoff_brief": {
+                        "action": "built",
+                        "handoff_id": handoff.handoff_id,
+                        "kind": handoff.kind.value,
+                        "strategy_report_id": handoff.strategy_report_id,
+                        "creative_pack_id": handoff.creative_pack_id,
+                        "visual_pack_id": handoff.visual_pack_id,
+                        "blocks_publish": handoff.blocks_publish,
+                        "rule_set_id": handoff.rule_set_id,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     # ---------- internals ----------
 

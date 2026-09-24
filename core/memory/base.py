@@ -88,7 +88,24 @@ class Memory(ABC):
 
     @abstractmethod
     def append_audit_event(self, event: AuditTrailEvent) -> None:
-        """Append an audit event for ``event.client_slug``.
+        """Append a pre-built audit event for ``event.client_slug``.
+
+        LOW-LEVEL / LEGACY API (job-execution-robustness): this method only
+        locks the *write* — it has no way to protect the ``prev_hash`` read
+        that happens before ``event`` is even constructed. A caller that
+        does ``last_audit_hash()`` then builds ``event`` then calls this
+        method has a race window between the read and the append; a
+        concurrent writer for the same ``client_slug`` can append in
+        between, and this call then fails (or, worse, silently produces a
+        non-chained event, depending on the backend).
+
+        No current runtime caller in ``core/`` or ``cli/`` uses this method
+        directly — every productive audit writer uses
+        :meth:`append_audit_event_atomic`, which builds the event *inside*
+        the same held lock that protects the read. Kept only for backward
+        compatibility (a pre-existing caller outside this codebase, or a
+        test that constructs an event out-of-band). New callers MUST use
+        :meth:`append_audit_event_atomic` instead.
 
         Storage-level requirement: ``event.client_slug`` MUST be set (the
         contract allows ``None`` but the storage layer rejects it).

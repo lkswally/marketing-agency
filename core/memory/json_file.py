@@ -186,14 +186,13 @@ class JsonFileMemory(Memory):
         structured, never silent corruption) rather than succeed, but
         that caller's work is lost, not retried.
 
-        :meth:`append_audit_event_atomic` closes that window completely
-        by building the event *inside* the lock, and is what
-        :mod:`core.jobs.runner` uses. Other current callers
-        (:mod:`core.approval.approval_pack`, :mod:`core.pipeline.orchestrator`)
-        still use this method with the older external-prev_hash pattern —
-        migrating them is out of scope for this milestone, which targets
-        the demonstrated job-execution-driven race specifically. Documented
-        here, not silently left as an unstated gap.
+        :meth:`append_audit_event_atomic` closes that window completely by
+        building the event *inside* the lock. As of the job-execution-
+        robustness GAP 1 follow-up, every productive audit writer in
+        ``core/`` and ``cli/`` uses that method — this one (LOW-LEVEL /
+        LEGACY API, see the base-class docstring) is kept only for backward
+        compatibility and must not be used by new callers or current
+        runtime paths.
         """
         if event.client_slug is None:
             raise ValueError(

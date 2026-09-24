@@ -203,28 +203,29 @@ class SEOIntelligenceReportBuilder:
                 pack.model_dump(mode="json"),
             )
 
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="seo_intelligence_builder",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "seo_intelligence_report_pack": {
-                    "action": "built",
-                    "report_id": pack.report_id,
-                    "period_start": str(pack.period_start) if pack.period_start else None,
-                    "period_end": str(pack.period_end) if pack.period_end else None,
-                    "period_entity_id": period_entity_id,
-                    "missing_evidence_count": len(pack.missing_evidence),
-                    "facts_count": pack.executive_summary.facts_count,
-                    "hypotheses_count": pack.executive_summary.hypotheses_count,
-                    "recommendations_count": pack.executive_summary.recommendations_count,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="seo_intelligence_builder",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "seo_intelligence_report_pack": {
+                        "action": "built",
+                        "report_id": pack.report_id,
+                        "period_start": str(pack.period_start) if pack.period_start else None,
+                        "period_end": str(pack.period_end) if pack.period_end else None,
+                        "period_entity_id": period_entity_id,
+                        "missing_evidence_count": len(pack.missing_evidence),
+                        "facts_count": pack.executive_summary.facts_count,
+                        "hypotheses_count": pack.executive_summary.hypotheses_count,
+                        "recommendations_count": pack.executive_summary.recommendations_count,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     # ---------- internals ----------
 

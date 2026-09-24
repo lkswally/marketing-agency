@@ -454,16 +454,17 @@ class NotionSyncExecutor:
         return None
 
     def _emit_event(self, *, client_slug: str, payload: dict) -> None:
-        prev = self._memory.last_audit_hash(client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="notion_sync_executor",
-            occurred_at=utcnow(),
-            client_slug=client_slug,
-            payload=payload,
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="notion_sync_executor",
+                occurred_at=utcnow(),
+                client_slug=client_slug,
+                payload=payload,
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     def _record_audit(
         self, client_slug: str, record: SyncedRecord, *, mode: SyncMode

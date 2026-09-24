@@ -177,24 +177,25 @@ class FeedbackPlanner:
             SINGLETON_ID,
             pack.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="feedback_planner",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "campaign_feedback_pack": {
-                    "pack_id": pack.pack_id,
-                    "total_items": pack.total_items,
-                    "high_priority_tasks": pack.stats.high_priority_tasks,
-                    "channel_adjustments": pack.stats.channel_adjustments,
-                    "action": "planned",
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="feedback_planner",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "campaign_feedback_pack": {
+                        "pack_id": pack.pack_id,
+                        "total_items": pack.total_items,
+                        "high_priority_tasks": pack.stats.high_priority_tasks,
+                        "channel_adjustments": pack.stats.channel_adjustments,
+                        "action": "planned",
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     def load_latest(self, client_slug: str) -> CampaignFeedbackPack:
         raw = self._memory.get(client_slug, CAMPAIGN_FEEDBACK_PACK_KIND, SINGLETON_ID)

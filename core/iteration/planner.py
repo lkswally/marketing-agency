@@ -186,25 +186,26 @@ class IterationPlanner:
             SINGLETON_ID,
             plan.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(plan.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="iteration_planner",
-            occurred_at=utcnow(),
-            client_slug=plan.client_slug,
-            payload={
-                "next_campaign_iteration_plan": {
-                    "plan_id": plan.plan_id,
-                    "total_items": plan.total_items,
-                    "total_actions": plan.stats.total_actions,
-                    "new_content_ideas": plan.stats.new_content_ideas,
-                    "ab_test_hypotheses": plan.stats.ab_test_hypotheses,
-                    "action": "planned",
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            plan.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="iteration_planner",
+                occurred_at=utcnow(),
+                client_slug=plan.client_slug,
+                payload={
+                    "next_campaign_iteration_plan": {
+                        "plan_id": plan.plan_id,
+                        "total_items": plan.total_items,
+                        "total_actions": plan.stats.total_actions,
+                        "new_content_ideas": plan.stats.new_content_ideas,
+                        "ab_test_hypotheses": plan.stats.ab_test_hypotheses,
+                        "action": "planned",
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     def load_latest(self, client_slug: str) -> NextCampaignIterationPlan:
         raw = self._memory.get(

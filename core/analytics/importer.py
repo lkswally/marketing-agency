@@ -189,7 +189,6 @@ class AnalyticsImporter:
         )
 
         # Audit event.
-        prev = self._memory.last_audit_hash(client_slug)
         audit_payload: dict = {
             "action": "imported",
             "import_id": report.import_id,
@@ -204,15 +203,17 @@ class AnalyticsImporter:
             audit_payload["period_end"] = str(period_end)
             audit_payload["period_label"] = period_label
             audit_payload["period_snapshot_entity_id"] = period_entity_id
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="analytics_importer",
-            occurred_at=utcnow(),
-            client_slug=client_slug,
-            payload={"analytics_import": audit_payload},
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="analytics_importer",
+                occurred_at=utcnow(),
+                client_slug=client_slug,
+                payload={"analytics_import": audit_payload},
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
         return report, period_snapshot if period_snapshot is not None else current_snapshot
 

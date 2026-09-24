@@ -394,31 +394,32 @@ class AnalyticsFetchService:
         action: str,
         report: AnalyticsFetchReport,
     ) -> None:
-        prev = self._memory.last_audit_hash(client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="analytics_fetch_service",
-            occurred_at=utcnow(),
-            client_slug=client_slug,
-            payload={
-                "analytics_fetch": {
-                    "action": action,
-                    "report_id": report.report_id,
-                    "source": report.source,
-                    "status": report.status.value,
-                    "rows_fetched": report.rows_fetched,
-                    "rows_normalized": report.rows_normalized,
-                    "rows_rejected": report.rows_rejected,
-                    "snapshot_id": report.snapshot_id,
-                    "sdk_available": report.sdk_available,
-                    "credentials_available": report.credentials_available,
-                    "dry_run": report.dry_run,
-                    "identifier_fingerprint": report.identifier_fingerprint,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="analytics_fetch_service",
+                occurred_at=utcnow(),
+                client_slug=client_slug,
+                payload={
+                    "analytics_fetch": {
+                        "action": action,
+                        "report_id": report.report_id,
+                        "source": report.source,
+                        "status": report.status.value,
+                        "rows_fetched": report.rows_fetched,
+                        "rows_normalized": report.rows_normalized,
+                        "rows_rejected": report.rows_rejected,
+                        "snapshot_id": report.snapshot_id,
+                        "sdk_available": report.sdk_available,
+                        "credentials_available": report.credentials_available,
+                        "dry_run": report.dry_run,
+                        "identifier_fingerprint": report.identifier_fingerprint,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
 
 def fetch_and_persist(

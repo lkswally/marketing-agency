@@ -325,21 +325,22 @@ def persist_utm_plan(
     )
 
     # Emit audit event
-    last_hash = memory.last_audit_hash(plan.client_slug)
-    event = AuditTrailEvent.build(
-        event_type=AuditEventType.MEMORY_WRITTEN,
-        client_slug=plan.client_slug,
-        actor="utm-builder",
-        occurred_at=utcnow(),
-        payload={
-            "kind": UTM_PLAN_KIND,
-            "entity_id": SINGLETON_ID,
-            "total_links": plan.total_links,
-            "channels_covered": plan.channels_covered,
-        },
-        prev_hash=last_hash,
+    memory.append_audit_event_atomic(
+        plan.client_slug,
+        lambda prev_hash_arg: AuditTrailEvent.build(
+            event_type=AuditEventType.MEMORY_WRITTEN,
+            client_slug=plan.client_slug,
+            actor="utm-builder",
+            occurred_at=utcnow(),
+            payload={
+                "kind": UTM_PLAN_KIND,
+                "entity_id": SINGLETON_ID,
+                "total_links": plan.total_links,
+                "channels_covered": plan.channels_covered,
+            },
+            prev_hash=prev_hash_arg,
+        ),
     )
-    memory.append_audit_event(event)
 
     # Write output files
     out_dir = outputs_root / plan.client_slug

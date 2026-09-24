@@ -482,16 +482,17 @@ class CreativeFactory:
     def _emit_event(
         self, *, client_slug: str, payload: dict[str, Any]
     ) -> None:
-        prev = self._memory.last_audit_hash(client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="creative_factory",
-            occurred_at=utcnow(),
-            client_slug=client_slug,
-            payload={"creative_pack": payload},
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="creative_factory",
+                occurred_at=utcnow(),
+                client_slug=client_slug,
+                payload={"creative_pack": payload},
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
 
 # ---------- Convenience pipeline ----------

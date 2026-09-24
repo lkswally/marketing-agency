@@ -126,26 +126,27 @@ class AnalyticsAnalyzer:
             SINGLETON_ID,
             pack.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="analytics_analyzer",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "analytics_analysis": {
-                    "action": "analyzed",
-                    "pack_id": pack.pack_id,
-                    "snapshot_id": pack.snapshot_id,
-                    "total_rows": pack.total_rows_analyzed,
-                    "best_channel": pack.best_channel,
-                    "worst_channel": pack.worst_channel,
-                    "recommendations": len(pack.recommendations),
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="analytics_analyzer",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "analytics_analysis": {
+                        "action": "analyzed",
+                        "pack_id": pack.pack_id,
+                        "snapshot_id": pack.snapshot_id,
+                        "total_rows": pack.total_rows_analyzed,
+                        "best_channel": pack.best_channel,
+                        "worst_channel": pack.worst_channel,
+                        "recommendations": len(pack.recommendations),
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     def load_latest(self, client_slug: str) -> OptimizationRecommendationPack:
         raw = self._memory.get(

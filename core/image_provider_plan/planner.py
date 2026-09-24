@@ -172,30 +172,31 @@ class ImageProviderPlanner:
             SINGLETON_ID,
             pack.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="image_provider_planner",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "image_provider_recommendation_pack": {
-                    "action": "planned",
-                    "pack_id": pack.pack_id,
-                    "job_pack_id": pack.job_pack_id,
-                    "total_jobs": pack.stats.total_jobs,
-                    "overrode_job_suggestion": pack.stats.overrode_job_suggestion,
-                    "skipped_blocked": pack.stats.skipped_blocked,
-                    "skipped_manual": pack.stats.skipped_manual,
-                    "total_estimated_cost_usd": round(
-                        pack.stats.total_estimated_cost_usd, 4,
-                    ),
-                    "rule_set_id": pack.rule_set_id,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="image_provider_planner",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "image_provider_recommendation_pack": {
+                        "action": "planned",
+                        "pack_id": pack.pack_id,
+                        "job_pack_id": pack.job_pack_id,
+                        "total_jobs": pack.stats.total_jobs,
+                        "overrode_job_suggestion": pack.stats.overrode_job_suggestion,
+                        "skipped_blocked": pack.stats.skipped_blocked,
+                        "skipped_manual": pack.stats.skipped_manual,
+                        "total_estimated_cost_usd": round(
+                            pack.stats.total_estimated_cost_usd, 4,
+                        ),
+                        "rule_set_id": pack.rule_set_id,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     # ---------- internals ----------
 

@@ -127,25 +127,26 @@ class GoogleAdsAnalyzer:
             PACK_SINGLETON,
             pack.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="google_ads_analyzer",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "google_ads_insight_pack": {
-                    "action": "analyzed",
-                    "pack_id": pack.pack_id,
-                    "snapshot_id": pack.snapshot_id,
-                    "ad_groups_profiled": pack.stats.ad_groups_profiled,
-                    "total_insights": pack.stats.total_insights,
-                    "rule_set_id": pack.rule_set_id,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="google_ads_analyzer",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "google_ads_insight_pack": {
+                        "action": "analyzed",
+                        "pack_id": pack.pack_id,
+                        "snapshot_id": pack.snapshot_id,
+                        "ad_groups_profiled": pack.stats.ad_groups_profiled,
+                        "total_insights": pack.stats.total_insights,
+                        "rule_set_id": pack.rule_set_id,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     # ---------- internals ----------
 

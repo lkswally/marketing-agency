@@ -335,16 +335,20 @@ class ApprovalPackBuilder:
     def _emit_event(
         self, *, client_slug: str, payload: dict[str, Any]
     ) -> None:
-        prev = self._memory.last_audit_hash(client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="approval_pack_builder",
-            occurred_at=utcnow(),
-            client_slug=client_slug,
-            payload={"approval_pack": payload},
-            prev_hash=prev,
+        # job-execution-robustness: atomic (read tail -> build -> append,
+        # one held per-client lock) so a concurrent writer for this same
+        # client (e.g. a job's own audit event) can never race this one.
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="approval_pack_builder",
+                occurred_at=utcnow(),
+                client_slug=client_slug,
+                payload={"approval_pack": payload},
+                prev_hash=prev,
+            ),
         )
-        self._memory.append_audit_event(event)
 
 
 class ApprovalStateError(RuntimeError):

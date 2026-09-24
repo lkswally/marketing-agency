@@ -180,31 +180,32 @@ class AdsFeedbackBridge:
             SINGLETON_ID,
             pack.model_dump(mode="json"),
         )
-        prev = self._memory.last_audit_hash(pack.client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="ads_feedback_bridge",
-            occurred_at=utcnow(),
-            client_slug=pack.client_slug,
-            payload={
-                "ads_feedback_bridge_pack": {
-                    "action": "bridged",
-                    "pack_id": pack.pack_id,
-                    "insight_pack_id": pack.insight_pack_id,
-                    "feedback_pack_id": pack.feedback_pack_id,
-                    "execution_task_pack_id": pack.execution_task_pack_id,
-                    "iteration_plan_id": pack.iteration_plan_id,
-                    "total_recommendations": pack.stats.total_recommendations,
-                    "total_campaign_adjustments": (
-                        pack.stats.total_campaign_adjustments
-                    ),
-                    "total_suggested_tasks": pack.stats.total_suggested_tasks,
-                    "rule_set_id": pack.rule_set_id,
-                }
-            },
-            prev_hash=prev,
+        self._memory.append_audit_event_atomic(
+            pack.client_slug,
+            lambda prev_hash_arg: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="ads_feedback_bridge",
+                occurred_at=utcnow(),
+                client_slug=pack.client_slug,
+                payload={
+                    "ads_feedback_bridge_pack": {
+                        "action": "bridged",
+                        "pack_id": pack.pack_id,
+                        "insight_pack_id": pack.insight_pack_id,
+                        "feedback_pack_id": pack.feedback_pack_id,
+                        "execution_task_pack_id": pack.execution_task_pack_id,
+                        "iteration_plan_id": pack.iteration_plan_id,
+                        "total_recommendations": pack.stats.total_recommendations,
+                        "total_campaign_adjustments": (
+                            pack.stats.total_campaign_adjustments
+                        ),
+                        "total_suggested_tasks": pack.stats.total_suggested_tasks,
+                        "rule_set_id": pack.rule_set_id,
+                    }
+                },
+                prev_hash=prev_hash_arg,
+            ),
         )
-        self._memory.append_audit_event(event)
 
     # ---------- internals ----------
 

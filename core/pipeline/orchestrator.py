@@ -865,16 +865,20 @@ class PipelineOrchestrator:
             enriched["job_id"] = self._job_id
         if self._correlation_id is not None:
             enriched["correlation_id"] = self._correlation_id
-        prev = self._memory.last_audit_hash(client_slug)
-        event = AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="pipeline_orchestrator",
-            occurred_at=utcnow(),
-            client_slug=client_slug,
-            payload={"campaign_pipeline": enriched},
-            prev_hash=prev,
+        # job-execution-robustness: atomic — this orchestrator can be
+        # job-driven, and the owning job's own audit events (jobs/runner.py)
+        # write to the same client's chain; build+append inside one lock.
+        self._memory.append_audit_event_atomic(
+            client_slug,
+            lambda prev: AuditTrailEvent.build(
+                event_type=AuditEventType.NOTE,
+                actor="pipeline_orchestrator",
+                occurred_at=utcnow(),
+                client_slug=client_slug,
+                payload={"campaign_pipeline": enriched},
+                prev_hash=prev,
+            ),
         )
-        self._memory.append_audit_event(event)
 
 
 __all__ = [

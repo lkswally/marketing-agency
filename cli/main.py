@@ -502,24 +502,25 @@ def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
     )
 
     # Audit.
-    prev = memory.last_audit_hash(args.client)
-    event = AuditTrailEvent.build(
-        event_type=AuditEventType.NOTE,
-        actor="build_tasks_cli",
-        occurred_at=_utcnow(),
-        client_slug=args.client,
-        payload={
-            "execution_task_pack": {
-                "pack_id": pack.pack_id,
-                "client_slug": pack.client_slug,
-                "total_tasks": pack.total_tasks,
-                "blocks_publish": pack.blocks_publish,
-                "action": "built",
-            }
-        },
-        prev_hash=prev,
+    memory.append_audit_event_atomic(
+        args.client,
+        lambda prev_hash_arg: AuditTrailEvent.build(
+            event_type=AuditEventType.NOTE,
+            actor="build_tasks_cli",
+            occurred_at=_utcnow(),
+            client_slug=args.client,
+            payload={
+                "execution_task_pack": {
+                    "pack_id": pack.pack_id,
+                    "client_slug": pack.client_slug,
+                    "total_tasks": pack.total_tasks,
+                    "blocks_publish": pack.blocks_publish,
+                    "action": "built",
+                }
+            },
+            prev_hash=prev_hash_arg,
+        ),
     )
-    memory.append_audit_event(event)
 
     payload = {
         "pack_id": pack.pack_id,
@@ -988,36 +989,37 @@ def _audit_ads_promotion(
     from core.contracts import AuditEventType, AuditTrailEvent
     from core.domain.base import utcnow as _utcnow
 
-    prev = memory.last_audit_hash(client_slug)
-    event = AuditTrailEvent.build(
-        event_type=AuditEventType.NOTE,
-        actor="ads_bridge_promoter",
-        occurred_at=_utcnow(),
-        client_slug=client_slug,
-        payload={
-            "ads_bridge_promotion": {
-                "action": "promoted",
-                "target": target,
-                "bridge_pack_id": bridge_pack_id,
-                "recommendations_promoted": (
-                    promotion_result.recommendations_promoted
-                ),
-                "tasks_promoted": promotion_result.tasks_promoted,
-                "channel_adjustments_promoted": (
-                    promotion_result.channel_adjustments_promoted
-                ),
-                "content_suggestions_promoted": (
-                    promotion_result.content_suggestions_promoted
-                ),
-                "iteration_actions_promoted": (
-                    promotion_result.iteration_actions_promoted
-                ),
-                "duplicates_skipped": promotion_result.duplicates_skipped,
-            }
-        },
-        prev_hash=prev,
+    memory.append_audit_event_atomic(
+        client_slug,
+        lambda prev_hash_arg: AuditTrailEvent.build(
+            event_type=AuditEventType.NOTE,
+            actor="ads_bridge_promoter",
+            occurred_at=_utcnow(),
+            client_slug=client_slug,
+            payload={
+                "ads_bridge_promotion": {
+                    "action": "promoted",
+                    "target": target,
+                    "bridge_pack_id": bridge_pack_id,
+                    "recommendations_promoted": (
+                        promotion_result.recommendations_promoted
+                    ),
+                    "tasks_promoted": promotion_result.tasks_promoted,
+                    "channel_adjustments_promoted": (
+                        promotion_result.channel_adjustments_promoted
+                    ),
+                    "content_suggestions_promoted": (
+                        promotion_result.content_suggestions_promoted
+                    ),
+                    "iteration_actions_promoted": (
+                        promotion_result.iteration_actions_promoted
+                    ),
+                    "duplicates_skipped": promotion_result.duplicates_skipped,
+                }
+            },
+            prev_hash=prev_hash_arg,
+        ),
     )
-    memory.append_audit_event(event)
 
 
 def _cmd_feedback_plan(args: argparse.Namespace, *, out) -> int:
@@ -2121,26 +2123,27 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     from core.contracts import AuditEventType, AuditTrailEvent
     from core.domain.base import utcnow as _utcnow
 
-    prev = memory.last_audit_hash(slug)
-    event = AuditTrailEvent.build(
-        event_type=AuditEventType.NOTE,
-        actor="intake_cli",
-        occurred_at=_utcnow(),
-        client_slug=slug,
-        payload={
-            "intake": {
-                "intake_id": validation.intake_id,
-                "client_slug": slug,
-                "is_valid": validation.is_valid,
-                "missing_critical": validation.missing_critical_count,
-                "missing_warning": validation.missing_warning_count,
-                "missing_info": validation.missing_info_count,
-                "action": "created",
-            }
-        },
-        prev_hash=prev,
+    memory.append_audit_event_atomic(
+        slug,
+        lambda prev_hash_arg: AuditTrailEvent.build(
+            event_type=AuditEventType.NOTE,
+            actor="intake_cli",
+            occurred_at=_utcnow(),
+            client_slug=slug,
+            payload={
+                "intake": {
+                    "intake_id": validation.intake_id,
+                    "client_slug": slug,
+                    "is_valid": validation.is_valid,
+                    "missing_critical": validation.missing_critical_count,
+                    "missing_warning": validation.missing_warning_count,
+                    "missing_info": validation.missing_info_count,
+                    "action": "created",
+                }
+            },
+            prev_hash=prev_hash_arg,
+        ),
     )
-    memory.append_audit_event(event)
 
     # Outputs (per-client subdirectory so multiple intakes coexist).
     outputs_dir = Path(args.outputs_dir) / slug
