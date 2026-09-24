@@ -702,70 +702,43 @@ def _cmd_import_metrics(args: argparse.Namespace, *, out) -> int:
     Exit codes:
     - 0 on success (even with rejected rows; check the report)
     - 2 when the file is missing / unparseable
-    """
-    import datetime as _datetime_mod
 
-    from core.analytics import (
-        AnalyticsImporter,
-        ImporterError,
-        MetricSource,
-        render_markdown_import_report,
-    )
-    from core.memory import JsonFileMemory
+    architecture/application-service-boundary (batch 2): thin adapter
+    over :func:`core.application.services.metrics.import_metrics`.
+    Reading the file path is the only thing left here — see that
+    module's docstring for why (LOCAL CLI INPUT vs SAFE APPLICATION
+    INPUT split, Phase 2).
+    """
+    from core.application import OperationContext
+    from core.application.services.metrics import import_metrics
 
     file_path = Path(args.file)
     if not file_path.exists():
         print(f"error: file not found: {file_path}", file=out)
         return 2
 
-    try:
-        source = MetricSource(args.source)
-    except ValueError:
-        print(
-            f"error: invalid source {args.source!r}; expected one of "
-            f"{', '.join(s.value for s in MetricSource)}.",
-            file=out,
-        )
-        return 2
-
-    # Parse optional period arguments.
-    period_start: _datetime_mod.date | None = None
-    period_end: _datetime_mod.date | None = None
-    if getattr(args, "period_start", None):
-        try:
-            period_start = _datetime_mod.date.fromisoformat(args.period_start)
-        except ValueError:
-            print(f"error: invalid --period-start {args.period_start!r}; expected YYYY-MM-DD", file=out)
-            return 2
-    if getattr(args, "period_end", None):
-        try:
-            period_end = _datetime_mod.date.fromisoformat(args.period_end)
-        except ValueError:
-            print(f"error: invalid --period-end {args.period_end!r}; expected YYYY-MM-DD", file=out)
-            return 2
-
-    memory = JsonFileMemory(Path(args.root))
-    importer = AnalyticsImporter(memory=memory)
-    try:
-        report, snapshot = importer.import_file(
-            client_slug=args.client,
-            source=source,
-            file_path=file_path,
-            period_start=period_start,
-            period_end=period_end,
-            period_label=getattr(args, "period_label", None) or None,
-        )
-    except ImporterError as e:
-        print(f"error: {e}", file=out)
-        return 2
-
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path = outputs_dir / "analytics-import-report.md"
-    md_path.write_text(render_markdown_import_report(report), encoding="utf-8")
-    json_path = outputs_dir / "analytics-import-report.json"
-    json_path.write_text(report.to_json(indent=2), encoding="utf-8")
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = import_metrics(
+        ctx,
+        source=args.source,
+        file_path=file_path,
+        period_start=getattr(args, "period_start", None),
+        period_end=getattr(args, "period_end", None),
+        period_label=getattr(args, "period_label", None) or None,
+    )
 
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    report = result.data["report"]
+    snapshot = result.data["snapshot"]
+    md_path = outputs_dir / "analytics-import-report.md"
+    json_path = outputs_dir / "analytics-import-report.json"
     payload = {
         "import_id": report.import_id,
         "client_slug": report.client_slug,
@@ -793,29 +766,27 @@ def _cmd_analyze_metrics(args: argparse.Namespace, *, out) -> int:
     - 0 on success
     - 2 when there is no MetricsSnapshot for the client (run
       `mkt import-metrics` at least once first)
-    """
-    from core.analytics import (
-        AnalyticsAnalyzer,
-        render_markdown_recommendations,
-    )
-    from core.memory import JsonFileMemory
 
-    memory = JsonFileMemory(Path(args.root))
-    analyzer = AnalyticsAnalyzer(memory=memory)
-    try:
-        pack = analyzer.analyze(args.client)
-    except ValueError as e:
-        print(f"error: {e}", file=out)
-        return 2
-    analyzer.persist(pack)
+    architecture/application-service-boundary (batch 2): thin adapter
+    over :func:`core.application.services.metrics.analyze_metrics`.
+    """
+    from core.application import OperationContext
+    from core.application.services.metrics import analyze_metrics
 
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path = outputs_dir / "analytics-recommendations.md"
-    md_path.write_text(render_markdown_recommendations(pack), encoding="utf-8")
-    json_path = outputs_dir / "analytics-recommendations.json"
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = analyze_metrics(ctx)
 
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    md_path = outputs_dir / "analytics-recommendations.md"
+    json_path = outputs_dir / "analytics-recommendations.json"
     payload = {
         "pack_id": pack.pack_id,
         "client_slug": pack.client_slug,
@@ -1070,32 +1041,31 @@ def _cmd_analytics_fetch(args: argparse.Namespace, *, out) -> int:
       not crashes).
     - 2 when ``--source`` is missing / unsupported (argparse) or the
       service raises a configuration ValueError.
+
+    architecture/application-service-boundary (batch 2): thin adapter
+    over :func:`core.application.services.analytics_fetch.fetch_analytics`.
+    Never reads an env var or instantiates a connector itself — see that
+    module's docstring for the secrets-boundary guarantee.
     """
-
-    from core.analytics.connectors import (
-        DEFAULT_LOOKBACK_DAYS,
-        AnalyticsFetchService,
-        resolve_connector,
-    )
-    from core.analytics.connectors.service import write_report_outputs
-    from core.memory import JsonFileMemory
-
-    memory = JsonFileMemory(Path(args.root))
-    try:
-        connector = resolve_connector(args.source, dry_run=args.dry_run)
-    except ValueError as e:
-        print(f"error: {e}", file=out)
-        return 2
-
-    service = AnalyticsFetchService(
-        memory=memory,
-        connector=connector,
-        lookback_days=args.lookback_days or DEFAULT_LOOKBACK_DAYS,
-    )
-    report = service.run(client_slug=args.client)
+    from core.application import OperationContext
+    from core.application.services.analytics_fetch import fetch_analytics
 
     outputs_dir = Path(args.outputs_dir)
-    md_path, json_path = write_report_outputs(report, outputs_dir=outputs_dir)
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = fetch_analytics(
+        ctx, source=args.source, dry_run=args.dry_run, lookback_days=args.lookback_days,
+    )
+
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    report = result.data
+    md_path = outputs_dir / f"analytics-fetch-report-{report.source}.md"
+    json_path = outputs_dir / f"analytics-fetch-report-{report.source}.json"
 
     payload = {
         "report_id": report.report_id,
