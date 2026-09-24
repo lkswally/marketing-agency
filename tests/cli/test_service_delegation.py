@@ -336,3 +336,74 @@ def test_analytics_fetch_calls_through_the_service(tmp_path: Path) -> None:
     payload = json.loads(text)
     assert payload["report_id"] == "fake-fetch-report-id"
     assert not (tmp_path / "mem").exists()
+
+
+# ---------- batch 3: ads-analyze / ads-feedback ----------
+
+def test_ads_analyze_calls_through_the_service(tmp_path: Path) -> None:
+    fake_pack = _Fake(
+        pack_id="fake-ads-insight-pack-id",
+        client_slug="acme",
+        contract_version="fake.v1",
+        snapshot_id="fake-snapshot-id",
+        stats=_Fake(
+            total_insights=1, ad_groups_profiled=1, rows_analyzed=5,
+            by_severity={}, by_action={},
+        ),
+        rule_set_id="fake-rules",
+    )
+    stub_result = OperationResult.ok_result(data=fake_pack, artifacts=[])
+
+    with patch(
+        "core.application.services.ads.analyze_ads", return_value=stub_result,
+    ) as mock_service:
+        code, text = _run(
+            [
+                "ads-analyze",
+                "--client", "acme",
+                "--root", str(tmp_path / "mem"),
+                "--outputs-dir", str(tmp_path / "out"),
+            ]
+        )
+    assert code == 0
+    mock_service.assert_called_once()
+    payload = json.loads(text)
+    assert payload["pack_id"] == "fake-ads-insight-pack-id"
+    assert not (tmp_path / "mem").exists()
+
+
+def test_ads_feedback_calls_through_the_service(tmp_path: Path) -> None:
+    fake_pack = _Fake(
+        pack_id="fake-ads-feedback-pack-id",
+        client_slug="acme",
+        contract_version="fake.v1",
+        insight_pack_id="fake-insight-pack-id",
+        feedback_pack_id=None,
+        execution_task_pack_id=None,
+        iteration_plan_id=None,
+        stats=_Fake(
+            total_recommendations=1, total_campaign_adjustments=0,
+            total_keyword_proposals=0, total_suggested_tasks=1,
+            by_recommendation_kind={}, by_recommendation_priority={},
+            by_adjustment_kind={},
+        ),
+        rule_set_id="fake-rules",
+    )
+    stub_result = OperationResult.ok_result(data=fake_pack, artifacts=[])
+
+    with patch(
+        "core.application.services.ads.build_ads_feedback", return_value=stub_result,
+    ) as mock_service:
+        code, text = _run(
+            [
+                "ads-feedback",
+                "--client", "acme",
+                "--root", str(tmp_path / "mem"),
+                "--outputs-dir", str(tmp_path / "out"),
+            ]
+        )
+    assert code == 0
+    mock_service.assert_called_once()
+    payload = json.loads(text)
+    assert payload["pack_id"] == "fake-ads-feedback-pack-id"
+    assert not (tmp_path / "mem").exists()

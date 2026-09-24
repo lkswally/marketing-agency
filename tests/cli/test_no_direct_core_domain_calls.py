@@ -35,6 +35,9 @@ _MIGRATED_FUNCTIONS = {
     "_cmd_import_metrics",
     "_cmd_analyze_metrics",
     "_cmd_analytics_fetch",
+    # batch 3
+    "_cmd_ads_analyze",
+    "_cmd_ads_feedback",
 }
 
 # A migrated function may still import these — they are adapter-only
