@@ -99,8 +99,26 @@ def test_submit_intake_strict_mode_blocks_on_critical(tmp_path: Path) -> None:
 
     ctx = _ctx(tmp_path, validation.client_slug)
     result = submit_intake(ctx, intake=intake, validation=validation, strict=True)
+
+    # A. status/error shape.
     assert not result.ok
     assert result.error.code is ErrorCode.POLICY_BLOCKED
+    # The block happens AFTER real side effects (persist/audit/write) —
+    # POLICY_BLOCKED must report them, not hide them.
+    assert result.artifacts != []
+    assert result.audit_event_id is not None
+    assert result.data["intake"] is intake
+    assert result.data["validation"] is validation
+
+    # B. artifacts really exist on disk, at the paths the result reports.
+    for artifact in result.artifacts:
+        assert artifact.path.exists()
+        assert artifact.would_write is False
+
+    # C. persisted intake/validation really exist in memory.
+    mem = JsonFileMemory(tmp_path / "mem")
+    assert mem.exists(validation.client_slug, "client_intake", "current")
+    assert mem.exists(validation.client_slug, "intake_validation", "current")
 
     # Files were still written even though --strict rejected the result
     # (matches the CLI's long-standing "reviewer can still fix" contract).

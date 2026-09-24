@@ -57,14 +57,27 @@ class ErrorCode(StrEnum):
     """The actor's role does not authorize this operation (MKT-11B)."""
 
     POLICY_BLOCKED = "policy_blocked"
-    """The operation completed its domain work correctly, but a
-    caller-supplied policy flag refuses the result (architecture/
-    application-service-boundary) — e.g. ``--strict`` + critical intake
-    issues, or ``--require-approval`` + a blocks-publish Approval Pack.
-    Distinct from PERMISSION_DENIED (actor/role authorization) and
-    INVALID_INPUT (malformed data): the input was well-formed and the
-    actor was allowed to call the operation, but the caller opted into a
-    stricter outcome than the underlying domain state satisfies."""
+    """A caller-requested policy prevented the operation from being
+    considered successful, independently of authorization or malformed
+    input (architecture/application-service-boundary) — e.g.
+    ``--strict`` + critical intake issues, or ``--require-approval`` + a
+    blocks-publish Approval Pack. Distinct from PERMISSION_DENIED
+    (actor/role authorization) and INVALID_INPUT (malformed data): the
+    input was well-formed and the actor was allowed to call the
+    operation, but the caller opted into a stricter outcome than the
+    underlying domain state satisfies.
+
+    Deliberately neutral about WHEN the block happens relative to any
+    side effects: some callers gate BEFORE doing domain work (e.g.
+    ``build_creative_pack``'s ``--require-approval`` check runs before
+    the factory builds anything — no side effects occur), others gate
+    AFTER legitimate side effects already landed (e.g.
+    ``submit_intake``'s ``--strict`` check runs after persisting the
+    intake/validation, writing artifacts, and appending the audit event
+    — those effects are real and must be reported, not hidden). See
+    :meth:`OperationResult.error_result`'s ``data``/``artifacts``/
+    ``audit_event_id`` parameters for how a caller reports which case
+    applies."""
 
     PERSISTENCE_ERROR = "persistence_error"
     """The stored entity could not be read back — corrupted JSON or a
@@ -153,10 +166,32 @@ class OperationResult(BaseModel):
         code: ErrorCode,
         message: str,
         remediation: str | None = None,
+        data: Any = None,
+        artifacts: list[Artifact] | None = None,
+        warnings: list[OperationWarning] | None = None,
+        audit_event_id: str | None = None,
     ) -> OperationResult:
+        """Build an ERROR result.
+
+        ``data``/``artifacts``/``warnings``/``audit_event_id`` are
+        optional and default to empty/``None`` — the overwhelming
+        majority of errors (bad input, not found, permission denied)
+        have no side effects to report. They exist for the narrower case
+        where a caller (most notably a POLICY_BLOCKED one — see that
+        code's docstring) already performed real, persisted side effects
+        BEFORE deciding the overall operation counts as a failure: the
+        caller passes exactly what actually happened, never fabricated.
+        A caller whose policy gate runs before any domain work simply
+        omits these and gets the same empty/``None`` result as before
+        this parameter existed.
+        """
         return cls(
             status=OperationStatus.ERROR,
             error=OperationError(code=code, message=message, remediation=remediation),
+            data=data,
+            artifacts=artifacts or [],
+            warnings=warnings or [],
+            audit_event_id=audit_event_id,
         )
 
 

@@ -19,8 +19,10 @@ So this module exposes two entry points instead of one:
   SAFE SERVICE INPUT: exactly what a future HTTP POST body would carry).
   Parses it into a :class:`ClientIntake`, runs
   :class:`~core.intake.validator.IntakeValidator`, and returns the
-  resolved ``client_slug`` alongside both objects. Raises no exceptions
-  that leak past Pydantic — a caller wraps this to build its
+  resolved ``client_slug`` alongside both objects. Raises
+  :class:`IntakeParseError` (never a raw Pydantic
+  :class:`~pydantic.ValidationError`) when ``raw_intake`` doesn't parse —
+  a caller catches that one controlled exception type to build its
   ``OperationResult``/HTTP error / etc.
 - :func:`submit_intake` — takes an already-built :class:`OperationContext`
   (constructed by the caller using the slug :func:`parse_and_validate`
@@ -171,15 +173,22 @@ def submit_intake(
         )
 
     if strict and validation.missing_critical_count > 0:
-        # Files were already written above (matches the CLI's long-
-        # standing behaviour: "still write the summary + intake so the
-        # reviewer can fix" even when --strict rejects the run).
+        # Everything above already happened for real: intake/validation
+        # are persisted, the audit event is written, and the artifact
+        # files exist on disk (matches the CLI's long-standing behaviour
+        # — "still write the summary + intake so the reviewer can fix"
+        # even when --strict rejects the run). POLICY_BLOCKED must report
+        # those real side effects, not hide them — see ErrorCode's
+        # docstring and OperationResult.error_result's parameters.
         return OperationResult.error_result(
             code=ErrorCode.POLICY_BLOCKED,
             message=(
                 f"--strict and critical issues present "
                 f"({validation.missing_critical_count})"
             ),
+            data={"intake": intake, "validation": validation},
+            artifacts=artifacts,
+            audit_event_id=event.event_id,
         )
 
     return OperationResult.ok_result(

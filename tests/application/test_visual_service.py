@@ -96,6 +96,9 @@ def test_require_approval_blocks_when_pack_blocks_publish(tmp_path: Path) -> Non
     result = build_visual_pack(ctx, require_approval=True)
     assert not result.ok
     assert result.error.code is ErrorCode.POLICY_BLOCKED
+    assert result.artifacts == []
+    assert result.audit_event_id is None
+    assert not mem.exists(report.client_slug, "visual_direction_pack", "current")
 
 
 # ---------- tenant isolation ----------
