@@ -265,53 +265,34 @@ def _cmd_build_creatives(args: argparse.Namespace, *, out) -> int:
     present) the latest ``ApprovalPack``, runs the :class:`CreativeFactory`,
     persists the resulting ``CreativeAssetPack`` to memory and writes
     Markdown + JSON to ``--outputs-dir``.
+
+    architecture/application-service-boundary: thin adapter over
+    :func:`core.application.services.creative.build_creative_pack`.
+    Behaviour unchanged; ``--require-approval`` now maps to
+    ``ErrorCode.POLICY_BLOCKED`` internally (still exit 3 here).
     """
-    from core.approval import get_latest_for_client
-    from core.creative import (
-        CreativeFactory,
-        render_markdown_pack,
-    )
-    from core.memory import EntityNotFound, JsonFileMemory
-    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
-
-    memory = JsonFileMemory(Path(args.root))
-    try:
-        report_raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
-    except EntityNotFound:
-        print(
-            f"error: no CampaignStrategyReport for client {args.client!r} "
-            f"under {args.root}; run `mkt run-strategy` first.",
-            file=out,
-        )
-        return 2
-    report = CampaignStrategyReport.model_validate(report_raw)
-
-    # MKT-11E compatibility shim: the most recent approval for this
-    # client, resolved dynamically (no more singleton read).
-    approval_pack = get_latest_for_client(memory, args.client)
-
-    if (
-        getattr(args, "require_approval", False)
-        and approval_pack is not None
-        and approval_pack.blocks_publish
-    ):
-        print(
-            "error: --require-approval set but the Approval Pack blocks publish",
-            file=out,
-        )
-        return 3
-
-    factory = CreativeFactory(memory=memory)
-    pack = factory.build(report, approval_pack)
-    factory.persist(pack)
+    from core.application import ErrorCode, OperationContext
+    from core.application.services.creative import build_creative_pack
 
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path = outputs_dir / "creative-pack.md"
-    md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
-    json_path = outputs_dir / "creative-pack.json"
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = build_creative_pack(
+        ctx, require_approval=getattr(args, "require_approval", False),
+    )
 
+    if not result.ok:
+        assert result.error is not None
+        if result.error.code is ErrorCode.POLICY_BLOCKED:
+            print(f"error: {result.error.message}", file=out)
+            return 3
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    md_path = outputs_dir / "creative-pack.md"
+    json_path = outputs_dir / "creative-pack.json"
     payload = {
         "pack_id": pack.pack_id,
         "client_slug": pack.client_slug,
@@ -337,61 +318,32 @@ def _cmd_build_visuals(args: argparse.Namespace, *, out) -> int:
     and the latest ``CreativeAssetPack`` (when present). Runs the
     :class:`VisualPromptFactory`, persists the resulting ``VisualDirectionPack``
     to memory and writes Markdown + JSON to ``--outputs-dir``.
+
+    architecture/application-service-boundary: thin adapter over
+    :func:`core.application.services.visual.build_visual_pack`.
     """
-    from core.approval import get_latest_for_client
-    from core.creative import (
-        CREATIVE_PACK_KIND,
-        CreativeAssetPack,
-    )
-    from core.creative import SINGLETON_ID as CREATIVE_SINGLETON_ID
-    from core.memory import EntityNotFound, JsonFileMemory
-    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
-    from core.visual import VisualPromptFactory, render_markdown_pack
-
-    memory = JsonFileMemory(Path(args.root))
-    try:
-        report_raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
-    except EntityNotFound:
-        print(
-            f"error: no CampaignStrategyReport for client {args.client!r} "
-            f"under {args.root}; run `mkt run-strategy` first.",
-            file=out,
-        )
-        return 2
-    report = CampaignStrategyReport.model_validate(report_raw)
-
-    # MKT-11E compatibility shim: most recent approval, resolved dynamically.
-    approval_pack = get_latest_for_client(memory, args.client)
-
-    creative_pack: CreativeAssetPack | None = None
-    try:
-        cp_raw = memory.get(args.client, CREATIVE_PACK_KIND, CREATIVE_SINGLETON_ID)
-        creative_pack = CreativeAssetPack.model_validate(cp_raw)
-    except EntityNotFound:
-        creative_pack = None
-
-    if (
-        getattr(args, "require_approval", False)
-        and approval_pack is not None
-        and approval_pack.blocks_publish
-    ):
-        print(
-            "error: --require-approval set but the Approval Pack blocks publish",
-            file=out,
-        )
-        return 3
-
-    factory = VisualPromptFactory(memory=memory)
-    pack = factory.build(report, approval_pack, creative_pack)
-    factory.persist(pack)
+    from core.application import ErrorCode, OperationContext
+    from core.application.services.visual import build_visual_pack
 
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    md_path = outputs_dir / "visual-direction-pack.md"
-    md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
-    json_path = outputs_dir / "visual-direction-pack.json"
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = build_visual_pack(
+        ctx, require_approval=getattr(args, "require_approval", False),
+    )
 
+    if not result.ok:
+        assert result.error is not None
+        if result.error.code is ErrorCode.POLICY_BLOCKED:
+            print(f"error: {result.error.message}", file=out)
+            return 3
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
+    md_path = outputs_dir / "visual-direction-pack.md"
+    json_path = outputs_dir / "visual-direction-pack.json"
     payload = {
         "pack_id": pack.pack_id,
         "client_slug": pack.client_slug,
@@ -424,104 +376,30 @@ def _cmd_build_tasks(args: argparse.Namespace, *, out) -> int:
     Exit codes:
     - 0 on success
     - 2 when the strategy report is missing for ``--client``
+
+    architecture/application-service-boundary: thin adapter over
+    :func:`core.application.services.tasks.build_task_pack`.
     """
-    import contextlib
-
-    from core.approval import get_latest_for_client
-    from core.contracts import AuditEventType, AuditTrailEvent
-    from core.creative import CREATIVE_PACK_KIND, CreativeAssetPack
-    from core.creative import SINGLETON_ID as CREATIVE_SINGLETON
-    from core.domain.base import utcnow as _utcnow
-    from core.execution import (
-        TaskFactory,
-        render_markdown_pack,
-        to_notion_payload,
-    )
-    from core.memory import EntityNotFound, JsonFileMemory
-    from core.strategy import REPORT_KIND, SINGLETON_ID, CampaignStrategyReport
-    from core.visual import SINGLETON_ID as VISUAL_SINGLETON
-    from core.visual import VISUAL_PACK_KIND, VisualDirectionPack
-
-    memory = JsonFileMemory(Path(args.root))
-
-    try:
-        report_raw = memory.get(args.client, REPORT_KIND, SINGLETON_ID)
-    except EntityNotFound:
-        print(
-            f"error: no CampaignStrategyReport for client {args.client!r} "
-            f"under {args.root}; run `mkt run-strategy` first.",
-            file=out,
-        )
-        return 2
-    report = CampaignStrategyReport.model_validate(report_raw)
-
-    # MKT-11E compatibility shim: most recent approval, resolved dynamically.
-    approval = get_latest_for_client(memory, args.client)
-
-    creative = None
-    with contextlib.suppress(EntityNotFound):
-        creative = CreativeAssetPack.model_validate(
-            memory.get(args.client, CREATIVE_PACK_KIND, CREATIVE_SINGLETON)
-        )
-
-    visual = None
-    with contextlib.suppress(EntityNotFound):
-        visual = VisualDirectionPack.model_validate(
-            memory.get(args.client, VISUAL_PACK_KIND, VISUAL_SINGLETON)
-        )
-
-    factory = TaskFactory(memory=memory)
-    pack = factory.build(report, approval, creative, visual)
-
-    # MKT-6H opt-in: promote AdsFeedbackBridgePack tasks into the
-    # execution pack. Without the flag, behaviour is unchanged.
-    if getattr(args, "include_ads_bridge", False):
-        bridge = _load_ads_bridge_pack_or_none(memory, args.client)
-        if bridge is not None:
-            from core.ads_promoter import promote_into_execution_tasks
-            result = promote_into_execution_tasks(bridge, pack)
-            _audit_ads_promotion(
-                memory, client_slug=args.client,
-                target="campaign_execution_task_pack",
-                bridge_pack_id=bridge.pack_id,
-                promotion_result=result,
-            )
-
-    factory.persist(pack)
+    from core.application import OperationContext
+    from core.application.services.tasks import build_task_pack
 
     outputs_dir = Path(args.outputs_dir)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
+    ctx = OperationContext(
+        client_slug=args.client, root=Path(args.root), outputs_root=outputs_dir,
+    )
+    result = build_task_pack(
+        ctx, include_ads_bridge=getattr(args, "include_ads_bridge", False),
+    )
+
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 2
+
+    pack = result.data
     md_path = outputs_dir / "campaign-execution-tasks.md"
-    md_path.write_text(render_markdown_pack(pack), encoding="utf-8")
     json_path = outputs_dir / "campaign-execution-tasks.json"
-    json_path.write_text(pack.to_json(indent=2), encoding="utf-8")
     notion_path = outputs_dir / "notion-task-payload.json"
-    notion_path.write_text(
-        json.dumps(to_notion_payload(pack), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-    # Audit.
-    memory.append_audit_event_atomic(
-        args.client,
-        lambda prev_hash_arg: AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="build_tasks_cli",
-            occurred_at=_utcnow(),
-            client_slug=args.client,
-            payload={
-                "execution_task_pack": {
-                    "pack_id": pack.pack_id,
-                    "client_slug": pack.client_slug,
-                    "total_tasks": pack.total_tasks,
-                    "blocks_publish": pack.blocks_publish,
-                    "action": "built",
-                }
-            },
-            prev_hash=prev_hash_arg,
-        ),
-    )
-
     payload = {
         "pack_id": pack.pack_id,
         "client_slug": pack.client_slug,
@@ -2088,18 +1966,20 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
     - 0 on success (including with warnings).
     - 2 when the input file is missing, unreadable or fails Pydantic validation.
     - 4 when ``--strict`` is set and the validator returned critical issues.
+
+    architecture/application-service-boundary: reading the file off local
+    disk (LOCAL CLI INPUT) and resolving the client_slug it implies stay
+    here — see :mod:`core.application.services.intake`'s module docstring
+    for why that split is structural, not incidental. Everything from "I
+    have a parsed, validated intake" onward is
+    :func:`core.application.services.intake.submit_intake`.
     """
-    from core.intake import (
-        INTAKE_KIND,
-        SINGLETON_ID,
-        VALIDATION_KIND,
-        ClientIntake,
-        IntakeNormalizationError,
-        IntakeValidator,
-        normalize_intake,
-        render_intake_summary,
+    from core.application import ErrorCode, OperationContext
+    from core.application.services.intake import (
+        IntakeParseError,
+        parse_and_validate,
+        submit_intake,
     )
-    from core.memory import JsonFileMemory
 
     file_path = Path(args.file)
     if not file_path.exists():
@@ -2107,74 +1987,31 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
         return 2
     try:
         raw = json.loads(file_path.read_text(encoding="utf-8"))
-        intake = ClientIntake.model_validate(raw)
-    except Exception as e:  # noqa: BLE001 — surface schema errors as exit 2
+    except json.JSONDecodeError as e:
         print(f"error: invalid intake: {e}", file=out)
         return 2
 
-    validation = IntakeValidator().validate(intake)
+    try:
+        intake, validation = parse_and_validate(raw)
+    except IntakeParseError as e:
+        print(f"error: invalid intake: {e}", file=out)
+        return 2
+
     slug = validation.client_slug
-
-    memory = JsonFileMemory(Path(args.root))
-    memory.put(slug, INTAKE_KIND, SINGLETON_ID, intake.model_dump(mode="json"))
-    memory.put(slug, VALIDATION_KIND, SINGLETON_ID, validation.model_dump(mode="json"))
-
-    # Audit event.
-    from core.contracts import AuditEventType, AuditTrailEvent
-    from core.domain.base import utcnow as _utcnow
-
-    memory.append_audit_event_atomic(
-        slug,
-        lambda prev_hash_arg: AuditTrailEvent.build(
-            event_type=AuditEventType.NOTE,
-            actor="intake_cli",
-            occurred_at=_utcnow(),
-            client_slug=slug,
-            payload={
-                "intake": {
-                    "intake_id": validation.intake_id,
-                    "client_slug": slug,
-                    "is_valid": validation.is_valid,
-                    "missing_critical": validation.missing_critical_count,
-                    "missing_warning": validation.missing_warning_count,
-                    "missing_info": validation.missing_info_count,
-                    "action": "created",
-                }
-            },
-            prev_hash=prev_hash_arg,
-        ),
+    outputs_dir = Path(args.outputs_dir)
+    ctx = OperationContext(client_slug=slug, root=Path(args.root), outputs_root=outputs_dir)
+    result = submit_intake(
+        ctx, intake=intake, validation=validation, strict=getattr(args, "strict", False),
     )
 
-    # Outputs (per-client subdirectory so multiple intakes coexist).
-    outputs_dir = Path(args.outputs_dir) / slug
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    intake_path = outputs_dir / "intake.json"
-    intake_path.write_text(intake.to_json(indent=2), encoding="utf-8")
-    md_path = outputs_dir / "intake-summary.md"
-    md_path.write_text(render_intake_summary(intake, validation), encoding="utf-8")
+    if not result.ok:
+        assert result.error is not None
+        print(f"error: {result.error.message}", file=out)
+        return 4 if result.error.code is ErrorCode.POLICY_BLOCKED else 2
 
-    brief_path: Path | None = None
-    if validation.can_normalize:
-        try:
-            brief = normalize_intake(intake, validation)
-        except IntakeNormalizationError as e:
-            print(f"error: normalization failed: {e}", file=out)
-            return 2
-        brief_path = outputs_dir / "brief.json"
-        brief_path.write_text(brief.to_json(indent=2), encoding="utf-8")
-
-    if (
-        getattr(args, "strict", False)
-        and validation.missing_critical_count > 0
-    ):
-        print(
-            "error: --strict and critical issues present "
-            f"({validation.missing_critical_count})",
-            file=out,
-        )
-        # Still write the summary + intake so the reviewer can fix.
-        return 4
-
+    intake_path = outputs_dir / slug / "intake.json"
+    md_path = outputs_dir / slug / "intake-summary.md"
+    brief_path = outputs_dir / slug / "brief.json"
     payload = {
         "intake_id": validation.intake_id,
         "client_slug": slug,
@@ -2186,7 +2023,7 @@ def _cmd_intake(args: argparse.Namespace, *, out) -> int:
         "operational_defaults_applied": validation.operational_defaults_applied,
         "intake_path": str(intake_path),
         "summary_path": str(md_path),
-        "brief_path": str(brief_path) if brief_path else None,
+        "brief_path": str(brief_path) if validation.can_normalize else None,
     }
     print(json.dumps(payload, indent=2, default=str), file=out)
     return 0

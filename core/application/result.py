@@ -56,6 +56,16 @@ class ErrorCode(StrEnum):
     PERMISSION_DENIED = "permission_denied"
     """The actor's role does not authorize this operation (MKT-11B)."""
 
+    POLICY_BLOCKED = "policy_blocked"
+    """The operation completed its domain work correctly, but a
+    caller-supplied policy flag refuses the result (architecture/
+    application-service-boundary) — e.g. ``--strict`` + critical intake
+    issues, or ``--require-approval`` + a blocks-publish Approval Pack.
+    Distinct from PERMISSION_DENIED (actor/role authorization) and
+    INVALID_INPUT (malformed data): the input was well-formed and the
+    actor was allowed to call the operation, but the caller opted into a
+    stricter outcome than the underlying domain state satisfies."""
+
     PERSISTENCE_ERROR = "persistence_error"
     """The stored entity could not be read back — corrupted JSON or a
     schema mismatch (MKT-11B). Distinct from NOT_FOUND: the record exists
